@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+    <meta charset="UTF-8">
+    <title>Forensic Suite: Master Edition</title>
+    <style>
+        :root { --accent: #00ff9d; --bg: #121212; --panel: #1e1e1e; --border: #333; --highlight: #00ff9d44; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: #e0e0e0; margin: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        
+        header { background: var(--panel); padding: 8px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; z-index: 100; }
+        #main-container { display: flex; flex: 1; overflow: hidden; }
+
+        /* Sidebar */
+        #sidebar { width: 260px; min-width: 150px; background: var(--panel); display: flex; flex-direction: column; border-right: 1px solid var(--border); }
+        .search-box { padding: 10px; border-bottom: 1px solid var(--border); }
+        .search-input { width: 100%; padding: 8px; background: #000; border: 1px solid #444; color: white; border-radius: 4px; box-sizing: border-box; font-size: 12px; }
+        #file-list { flex: 1; overflow-y: auto; }
+}
+
+.file-item > span {
+    font-size: 12px;
+    padding: 5px;
+    display: block;
+    border: turquoise;
+    border-width: 1px 0px 0px 0px;
+    border-style: ridge;
+    color: red;
+}
+
+.file-item > button {
+    display: block;
+    margin: 1px 0px 5px 5px;
+}
+.file-item { 
+    padding: 8px 12px; 
+    border-bottom: 1px solid #2a2a2a; 
+    cursor: pointer; 
+    font-size: 12px; 
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center; 
+    gap: 8px; 
+}
+
+.file-item.active { 
+    border-left: 4px solid var(--accent); 
+    background: #252525; 
+    color: var(--accent); 
+}
+        .hidden { display: none !important; }
+        
+        /* Center Player Panel - Optimized for size */
+        #player-panel { flex: 2; display: flex; flex-direction: column; padding: 10px; background: #000; overflow: hidden; }
+        #video-wrapper { flex: 1; display: flex; align-items: center; justify-content: center; background: #000; border-radius: 8px; overflow: hidden; min-height: 0; }
+        video { max-width: 100%; max-height: 100%; width: auto; height: auto; }
+        
+        .controls-area { flex-shrink: 0; padding-top: 10px; background: #000; }
+        .seek-container { margin-bottom: 10px; background: #1e1e1e; padding: 8px; border-radius: 6px; }
+        #seek-bar { width: 100%; accent-color: var(--accent); cursor: pointer; }
+
+        /* Compact Stats Row */
+        .stats-row { display: flex; justify-content: space-between; align-items: center; padding: 0 10px; margin-bottom: 8px; }
+        .timer-display { font-family: 'Courier New', monospace; font-size: 1.4rem; color: var(--accent); }
+        .frame-display { color: #888; font-family: 'Courier New', monospace; font-size: 0.9rem; }
+
+        /* Logs Panel */
+        #log-panel { width: 420px; background: var(--panel); border-left: 1px solid var(--border); display: flex; flex-direction: column; padding: 15px; }
+        .log-container { flex: 1; overflow-y: auto; margin-top: 10px; scroll-behavior: smooth; padding-right: 5px; }
+        .log-entry { background: #121212; padding: 12px; border-radius: 6px; margin-bottom: 12px; border: 1px solid #333; transition: background 0.3s, border 0.3s; }
+        .log-entry.active-moment { border-color: var(--accent); box-shadow: 0 0 12px var(--highlight); background: #1a2a24; }
+
+        .btn-group { display: flex; gap: 4px; justify-content: center; flex-wrap: wrap; }
+        button { cursor: pointer; background: #333; color: white; border: 1px solid #444; padding: 6px 10px; border-radius: 4px; font-size: 11px; transition: 0.1s; }
+        button:hover { border-color: var(--accent); background: #444; }
+        
+        .note-area { width: 100%; background: #000; border: 1px solid #444; color: #bbb; padding: 8px; margin-top: 8px; border-radius: 4px; box-sizing: border-box; font-family: inherit; font-size: 13px; min-height: 50px; line-height: 1.4; resize: vertical; }
+        .resizer { width: 4px; background: var(--border); cursor: col-resize; transition: 0.2s; }
+        .resizer:hover { background: var(--accent); }
+
+/* Audio Visualizer Styling */
+#audio-visualizer {
+    width: 100%;
+    height: 60px;
+    background: #000;
+    border: 1px solid #333;
+    border-radius: 4px;
+    margin-bottom: 5px;
+    display: block;
+}
+.voice-alert {
+    color: #ff0055 !important;
+    text-shadow: 0 0 10px #ff0055;
+    font-weight: bold;
+}
+.focus {
+    background: #FF5722;
+    border: crimson;
+    border-style: solid;
+    color: black;    
+}
+
+/* Transcript */
+.transcript-entry { border-left: 3px solid #8bc34a; background: #162016; }
+
+/*Prevent back navigation modal*/
+
+.hidden {
+    display: none;
+}
+
+#backModal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    color: black;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-content {
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+}
+
+    </style>
+</head>
+<body>
+
+<header>
+    <div style="display: flex; align-items: center; gap: 15px;">
+        <strong style="letter-spacing: 1px;">FORENSIC ANALYSIS SUITE</strong>
+        <input type="file" id="loader" multiple="" accept="video/*">
+    </div>
+    <div style="display: flex; gap: 8px;">
+        <button onclick="document.getElementById('log-importer').click()" style="background: #9C27B0;">LOAD .TXT LOG</button>
+
+	<button onclick="document.getElementById('vtt-importer').click()" style="background:#FF5722;">LOAD TRANSCRIPT (.VTT)</button>
+	<input type="file" id="vtt-importer" accept=".vtt" style="display:none">
+
+        <input type="file" id="log-importer" accept=".txt" style="display:none">
+        <button onclick="copyToClipboard()" style="background: #607D8B;">COPY LOG</button>
+        <button onclick="exportLog()" style="background: #4CAF50;">SAVE .TXT</button>
+    </div>
+</header>
+
+<div id="main-container">
+    <div id="sidebar">
+        <div class="search-box"><input type="text" id="video-search" class="search-input" placeholder="Search videos..."></div>
+        <div id="file-list"></div>
+    </div>
+
+    <div class="resizer" id="resizer1"></div>
+
+    <div id="player-panel">
+        <div id="video-wrapper">
+            <video id="vid"></video>
+        </div>
+
+        <div class="controls-area">
+            <div class="seek-container">
+<canvas id="audio-visualizer"></canvas>
+                <input type="range" id="seek-bar" value="0" min="0" step="0.0001">
+            </div>
+
+            <div class="stats-row">
+                <div class="timer-display">
+                    <span id="timer">00:00:00.000</span>
+                    <span id="duration" style="color: #666; font-size: 0.9rem;"> / 00:00:00.000</span>
+                </div>
+                <div id="frame-count" class="frame-display">FRAME: 0</div>
+            </div>
+            
+            <div class="btn-group">
+                <button onclick="setSpeed(0.25)" style="color:#ff9800">0.25x</button>
+                <button onclick="setSpeed(1)" style="color:#ff9800">1.0x</button>
+                <button onclick="step(-0.033)">-1 FRM</button>
+                <button id="playBtn" style="background: var(--accent); color: #000; font-weight: bold; min-width: 70px;">PLAY</button>
+                <button onclick="step(0.033)">+1 FRM</button>
+                <button onclick="logTime()" style="background: #2196F3;">+ LOG MOMENT</button>
+                <button onclick="takeSnapshot()" style="background: #e91e63;">📸 CAPTURE PNG</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="resizer" id="resizer2"></div>
+
+    <div id="log-panel">
+        <button onclick="clearLogEntries()" style="background: #9C27B0;">Clear Log Entries</button>
+        <div class="search-box"><input type="text" id="log-search" class="search-input" placeholder="Search notes..."></div>
+        <strong style="margin: 5px 0; font-size: 12px; color: #888;">ANALYSIS LOGS</strong>
+        <div class="log-container" id="log-list"></div>
+    </div>
+</div>
+<div id="backModal" class="hidden">
+    <div class="modal-content">
+        <p>Go back to previous page?</p>
+
+        <button id="confirmBack">
+            Yes
+        </button>
+
+        <button id="cancelBack">
+            Cancel
+        </button>
+    </div>
+</div>
+<canvas id="snapshot-canvas" style="display:none;"></canvas>
+
+<script>
+    const v = document.getElementById('vid');
+    const timer = document.getElementById('timer');
+    const frameCount = document.getElementById('frame-count');
+    const loader = document.getElementById('loader');
+    const playBtn = document.getElementById('playBtn');
+    const logList = document.getElementById('log-list');
+    const seekBar = document.getElementById('seek-bar');
+    const fileList = document.getElementById('file-list');
+    const videoSearch = document.getElementById('video-search');
+    const logSearch = document.getElementById('log-search');
+    const logImporter = document.getElementById('log-importer');
+
+// --- Audio Analysis Variables ---
+let audioCtx, analyser, source, dataArray;
+let isAudioSetup = false;
+const canvas = document.getElementById('audio-visualizer');
+const canvasCtx = canvas.getContext('2d');
+let animationId;
+
+// --- Audio Analysis Functions ---
+
+function initAudio() {
+    if (isAudioSetup) return;
+    
+    // 1. Create Context
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = audioCtx.createAnalyser();
+    
+    // 2. Connect Source
+    // This is crucial: we must connect the existing video element
+    source = audioCtx.createMediaElementSource(v);
+    source.connect(analyser);
+    analyser.connect(audioCtx.destination);
+
+    // 3. Settings
+    analyser.fftSize = 256; 
+    const bufferLength = analyser.frequencyBinCount;
+    dataArray = new Uint8Array(bufferLength);
+    
+    isAudioSetup = true;
+    console.log("Audio Forensic System Online");
+    drawVisualizer();
+}
+
+function drawVisualizer() {
+    animationId = requestAnimationFrame(drawVisualizer);
+    
+    // Force canvas to match its displayed size
+    if (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight) {
+        canvas.width = canvas.clientWidth;
+        canvas.height = canvas.clientHeight;
+    }
+
+    analyser.getByteFrequencyData(dataArray);
+
+    // Clear Canvas
+    canvasCtx.fillStyle = '#000';
+    canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const barWidth = (canvas.width / dataArray.length) * 2;
+    let x = 0;
+
+    for (let i = 0; i < dataArray.length; i++) {
+        const val = dataArray[i]; // Value 0 - 255
+        const percent = val / 255;
+        const h = percent * canvas.height;
+
+        // Forensic Coloring: Highlight the Voice Band (approx bins 10-40)
+        if (i > 10 && i < 40) {
+            canvasCtx.fillStyle = val > 120 ? '#00ff9d' : '#006644'; // Bright green if loud
+            
+            // Logic: If voice band is significantly louder than bass/treble
+            if (val > 150) {
+                frameCount.style.color = "var(--accent)";
+                frameCount.textContent = "ALIVE VOICE DETECTED";
+            }
+        } else {
+            canvasCtx.fillStyle = '#333'; // Background noise / non-vocal
+        }
+
+        canvasCtx.fillRect(x, canvas.height - h, barWidth - 1, h);
+        x += barWidth;
+    }
+}
+
+    // --- New Keyboard Shortcuts & Duration Support ---
+
+    const durationDisplay = document.getElementById('duration');
+
+    // Helper to format time for the duration display
+
+    function formatTime(t) {
+        if (isNaN(t)) return "00:00:00.000";
+        const h = Math.floor(t / 3600).toString().padStart(2, '0');
+        const m = Math.floor((t % 3600) / 60).toString().padStart(2, '0');
+        const s = Math.floor(t % 60).toString().padStart(2, '0');
+        const ms = Math.floor((t % 1) * 1000).toString().padStart(3, '0');
+        return `${h}:${m}:${s}.${ms}`;
+    }
+
+    let activeFileName = "";
+    const FPS = 29.97;
+
+    // Keyboard Event Listener
+    window.addEventListener('keydown', (e) => {
+        // If user is typing in a note/search, don't trigger shortcuts
+        if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
+
+        if (e.ctrlKey && e.key === "ArrowRight") {
+            e.preventDefault();
+            v.currentTime += 5; // Jump forward 5 seconds
+        } else if (e.ctrlKey && e.key === "ArrowLeft") {
+            e.preventDefault();
+            v.currentTime -= 2; // Jump backward 2 seconds
+        } else if (e.key === " ") { // Spacebar to play/pause
+            e.preventDefault();
+            playBtn.click();
+        } else if (e.ctrlKey && e.altKey) { // Control + Alt to create log entry
+            e.preventDefault();
+            logTime();
+        } else if (e.altKey && e.key === "ArrowLeft") { // Alt + Left arrow: prevent going back and loosing log entries
+
+            e.preventDefault();
+            e.stopPropagation();
+
+            showBackNavigationDialog();
+        }
+    });
+
+//--- PREVENT BACK NAVIGATION THROUGH KEYBOARD ---//
+    function showBackNavigationDialog() {
+
+        document
+            .getElementById("backModal")
+            .classList.remove("hidden");
+
+document.getElementById("cancelBack").focus();
+
+document.getElementById("cancelBack").classList.add("focus");
+
+    }
+
+document
+    .getElementById("confirmBack")
+    .addEventListener("click", function () {
+
+        history.back();
+    });
+
+document
+    .getElementById("cancelBack")
+    .addEventListener("click", function () {
+
+        document
+            .getElementById("backModal")
+            .classList.add("hidden");
+    });
+
+    // --- Search Logic ---
+
+    videoSearch.oninput = (e) => {
+        const term = e.target.value.toLowerCase();
+        Array.from(fileList.children).forEach(item => {
+            item.classList.toggle('hidden', !item.textContent.toLowerCase().includes(term));
+        });
+    };
+
+    logSearch.oninput = (e) => {
+        const term = e.target.value.toLowerCase();
+        Array.from(logList.children).forEach(entry => {
+            const note = entry.querySelector('.note-area').value.toLowerCase();
+            const time = entry.querySelector('span').textContent.toLowerCase();
+            entry.classList.toggle('hidden', !(note.includes(term) || time.includes(term)));
+        });
+    };
+
+    // --- Import Log Logic ---
+
+   logImporter.onchange = function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(event) {
+        const content = event.target.result;
+
+        // FIXED: handles multiple blank lines
+        const entries = content.split(/\n+(?=\[\d{2}:\d{2}:\d{2}\.\d{3}\])/);
+
+        logList.innerHTML = '';
+
+        entries.forEach(entryText => {
+            const match = entryText.match(/^\[(\d{2}:\d{2}:\d{2}\.\d{3})\]\s*([\s\S]*)/);
+            if (match) {
+                const time = match[1];
+                const note = match[2].trim();
+                createLogEntry(timeToSeconds(time), time, note);
+            }
+        });
+
+        logImporter.value = '';
+    };
+
+    reader.readAsText(file);
+};
+
+    function timeToSeconds(t) {
+        const p = t.split(':');
+        return parseFloat(p[0]) * 3600 + parseFloat(p[1]) * 60 + parseFloat(p[2]);
+    }
+
+    function clearLogEntries(){
+
+        logList.innerHTML = '';
+
+    }
+
+    function createLogEntry(seconds, timeStr, note = "") {
+        const entry = document.createElement('div');
+        entry.className = 'log-entry';
+        entry.setAttribute('data-seconds', seconds);
+        entry.innerHTML = `
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span id="T${timeStr.replace(/:/g, '').replace(/\./g, '')}" style="color:var(--accent); font-family:monospace; font-size:12px;">${timeStr}</span>
+                    <button onclick="navigator.clipboard.writeText(document.querySelector('#T${timeStr.replace(/:/g, '').replace(/\./g, '')}').innerText)" style="background:#422; border:none; padding:2px 6px; font-size:9px;">Copy</button>
+                <div>
+                    <button onclick="jumpTo(${seconds})" style="padding:2px 6px; font-size:9px;">JUMP</button>
+                    <button onclick="this.closest('.log-entry').remove()" style="background:#422; border:none; padding:2px 6px; font-size:9px;">X</button>
+                </div>
+            </div>
+            <textarea class="note-area" placeholder="Notes...">${note}</textarea>
+        `;
+        logList.appendChild(entry);
+
+// Auto-adjust textarea height to fit content
+        const ta = entry.querySelector('.note-area');
+        const adjustHeight = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; };
+        adjustHeight();
+        ta.addEventListener('input', adjustHeight);
+
+        sortLogs();
+        
+        // Return the entry so the calling function can interact with it
+        return entry;
+    }
+
+
+function createTranscriptEntry(timeStr,text){
+
+    const seconds=typeof timeStr==='number'?timeStr:timeToSeconds(timeStr);
+    const entry=createLogEntry(seconds,formatTime(seconds),text);
+    entry.classList.add('transcript-entry');
+    return entry;
+
+}
+
+	// --- VTT Parsing ---
+
+function parseVTT(vttText) {
+    let currentTime = null;
+    let buffer = [];
+    const lines = vttText.split('\n');
+
+    lines.forEach(line => {
+        line = line.trim();
+        const match = line.match(/(\d{2}:\d{2}:\d{2}\.\d{3})\s-->/);
+        if (match) {
+            if(currentTime !== null && buffer.length) {
+                const text = buffer.join(' ');
+                const entry = createTranscriptEntry(currentTime, text);
+            }
+            currentTime = timeToSeconds(match[1]);
+            buffer = [];
+            return;
+        }
+        if (!isNaN(line)) return;
+        if (line === "WEBVTT") return;
+        if(line.length) buffer.push(line);
+    });
+
+    if(currentTime !== null && buffer.length) {
+        const text = buffer.join(' ');
+        const entry = createTranscriptEntry(currentTime, text);
+    }
+}
+
+// --- VTT Import ---
+document.getElementById('vtt-importer').onchange=function(e){
+    const file=e.target.files[0];
+    if(!file) return;
+    const reader=new FileReader();
+    reader.onload=function(ev){
+        parseVTT(ev.target.result);
+        e.target.value='';
+    };
+    reader.readAsText(file);
+};
+
+    function sortLogs() {
+        let entries = Array.from(logList.children);
+        entries.sort((a, b) => parseFloat(a.getAttribute('data-seconds')) - parseFloat(b.getAttribute('data-seconds')));
+        logList.innerHTML = '';
+        entries.forEach(e => logList.appendChild(e));
+    }
+
+    function logTime() {
+        v.pause(); 
+        playBtn.textContent = "PLAY";
+        
+        // Create the entry and capture the returned element
+        const newEntry = createLogEntry(v.currentTime, timer.textContent);
+        
+        // Find the textarea inside that new entry and focus it
+        const textarea = newEntry.querySelector('textarea');
+        textarea.focus();
+    }
+
+    // --- Highlighting & Auto-Scroll Logic ---
+    function updateActiveHighlight() {
+        const currentTime = v.currentTime;
+        let bestMatch = null;
+        
+        Array.from(logList.children).forEach(entry => {
+            const entryTime = parseFloat(entry.getAttribute('data-seconds'));
+            // If playhead is between this entry and the next (or end of vid)
+            if (currentTime >= entryTime && currentTime < entryTime + 1.2) {
+                bestMatch = entry;
+            }
+            entry.classList.remove('active-moment');
+        });
+
+        if (bestMatch) {
+            bestMatch.classList.add('active-moment');
+
+            // This is the Auto-Scroll feature
+        const intoView=document.querySelector('.active-moment')?.nextElementSibling;
+        intoView?.scrollIntoView({behavior:'smooth',block:'end'});
+        }
+    }
+
+// --- Core Player Logic ---
+    loader.onchange = function() {
+        fileList.innerHTML = '';
+        Array.from(this.files).forEach((file, index) => {
+            const item = document.createElement('div');
+            item.className = 'file-item';
+            
+            const titleSpan = document.createElement('span');
+            titleSpan.style.flex = '1';
+            titleSpan.style.overflow = 'hidden';
+            titleSpan.style.textOverflow = 'ellipsis';
+            titleSpan.textContent = file.name;
+            
+            const copyBtn = document.createElement('button');
+            copyBtn.textContent = 'Copy';
+            copyBtn.style.padding = '2px 6px';
+            copyBtn.style.fontSize = '9px';
+            copyBtn.style.flexShrink = '0';
+            copyBtn.onclick = (e) => {
+                e.stopPropagation();
+                navigator.clipboard.writeText(file.name);
+            };
+
+            item.appendChild(titleSpan);
+            item.appendChild(copyBtn);
+
+            item.onclick = () => {
+                document.querySelectorAll('.file-item').forEach(i => i.classList.remove('active'));
+                item.classList.add('active');
+                activeFileName = file.name;
+                v.src = URL.createObjectURL(file);
+            
+                // Wait for metadata to show total time
+                v.onloadedmetadata = () => { 
+                    seekBar.max = v.duration; 
+                    durationDisplay.textContent = " / " + formatTime(v.duration);
+                };
+            };
+            fileList.appendChild(item);
+            if(index === 0) item.click();
+        });
+    };
+
+
+// UPDATE YOUR PLAY BUTTON ONE MORE TIME
+const originalPlay = playBtn.onclick;
+
+playBtn.onclick = () => {
+    if (v.paused) { 
+        initAudio(); // Initialize
+        if (audioCtx.state === 'suspended') audioCtx.resume(); // Resume
+        v.play(); 
+        playBtn.textContent = "PAUSE"; 
+    } else { 
+        v.pause(); 
+        playBtn.textContent = "PLAY"; 
+    }
+};
+    
+    v.ontimeupdate = () => { 
+        seekBar.value = v.currentTime;
+        updateActiveHighlight(); 
+    };
+
+    seekBar.oninput = () => { v.currentTime = seekBar.value; v.pause(); playBtn.textContent = "PLAY"; };
+    function step(s) { v.pause(); v.currentTime += s; playBtn.textContent = "PLAY"; }
+    function setSpeed(r) { v.playbackRate = r; }
+    function jumpTo(time) { v.pause(); v.currentTime = time; playBtn.textContent = "PLAY"; }    
+
+    function updateDisplay() {
+        timer.textContent = formatTime(v.currentTime);
+        frameCount.textContent = `FRAME: ${Math.floor(v.currentTime * FPS)}`;
+        requestAnimationFrame(updateDisplay);
+    }
+    updateDisplay();
+
+    function getCleanContent() {
+        return Array.from(document.querySelectorAll('.log-entry'))
+            .map(el => `[${el.querySelector('span').textContent}] ${el.querySelector('.note-area').value}`)
+            .join('\n');
+    }
+
+    function exportLog() {
+        const blob = new Blob([getCleanContent()], { type: 'text/plain' });
+        const a = document.createElement('a');
+        a.download = `Analysis_${activeFileName || 'Log'}.txt`;
+        a.href = URL.createObjectURL(blob);
+        a.click();
+    }
+    
+    function copyToClipboard() {
+        navigator.clipboard.writeText(getCleanContent());
+    }
+
+    function makeResizable(resizer, panel, isLeft) {
+        let isResizing = false;
+        resizer.addEventListener('mousedown', () => isResizing = true);
+        document.addEventListener('mousemove', (e) => {
+            if (!isResizing) return;
+            const width = isLeft ? e.clientX : window.innerWidth - e.clientX;
+            if(width > 150) panel.style.width = width + 'px';
+        });
+        document.addEventListener('mouseup', () => isResizing = false);
+    }
+    makeResizable(document.getElementById('resizer1'), document.getElementById('sidebar'), true);
+    makeResizable(document.getElementById('resizer2'), document.getElementById('log-panel'), false);
+
+    // --- Snapshot button ---
+    function takeSnapshot() {
+        if (!v.src) return;
+        const ctx = canvas.getContext('2d');
+        canvas.width = v.videoWidth;
+        canvas.height = v.videoHeight;
+        try {
+            ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+            const timeCode = timer.textContent.replace(/:/g, '-').replace(/\./g, '_');
+            const link = document.createElement('a');
+            link.download = `Capture_${activeFileName}_${timeCode}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        } catch (e) { console.error("Capture Security Blocked"); }
+    }
+</script>
+
+</body></html>
