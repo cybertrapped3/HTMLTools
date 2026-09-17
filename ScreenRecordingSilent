@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Offline Silent Screen Recorder</title>
+<style>
+:root {
+    --bg-main: #0f1115;
+    --bg-card: #181b22;
+    --bg-element: #21252f;
+    --border-color: #2e3442;
+    --accent-primary: #3b82f6;
+    --accent-success: #10b981;
+    --accent-danger: #ef4444;
+    --text-main: #f3f4f6;
+    --text-muted: #9ca3af;
+}
+
+body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg-main);
+    color: var(--text-main);
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 30px 20px;
+    min-height: 100vh;
+    box-sizing: border-box;
+}
+
+#recorderUI {
+    width: 100%;
+    max-width: 900px;
+    background: var(--bg-card);
+    padding: 24px;
+    border-radius: 16px;
+    border: 1px solid var(--border-color);
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4), 0 8px 10px -6px rgba(0, 0, 0, 0.4);
+}
+
+h2 {
+    margin-top: 0;
+    font-size: 1.25rem;
+    font-weight: 600;
+    letter-spacing: -0.025em;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 12px;
+    margin-bottom: 16px;
+}
+
+h3 {
+    font-size: 1rem;
+    font-weight: 500;
+    margin: 20px 0 8px 0;
+    color: var(--text-muted);
+}
+
+/* Button & Toolbar Styles */
+.toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+button {
+    background: var(--bg-element);
+    color: var(--text-main);
+    border: 1px solid var(--border-color);
+    padding: 8px 14px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+button:hover:not(:disabled) {
+    background: #2a303c;
+    border-color: #3b4252;
+}
+
+button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+#recordBtn {
+    background: var(--accent-success);
+    border-color: #059669;
+    color: white;
+    font-weight: 600;
+}
+#recordBtn:hover:not(:disabled) { background: #059669; }
+#recordBtn.recording { 
+    background: var(--accent-danger); 
+    border-color: #dc2626;
+    animation: pulse 2s infinite; 
+}
+
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.7; }
+    100% { opacity: 1; }
+}
+
+#stopBtn { background: rgba(239, 68, 68, 0.15); border-color: rgba(239, 68, 68, 0.3); color: #fca5a5; }
+#stopBtn:hover:not(:disabled) { background: rgba(239, 68, 68, 0.25); }
+
+/* Utility groups */
+.snapshot-group {
+    background: var(--bg-element);
+    padding: 4px 8px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+input[type="number"] {
+    width: 40px;
+    background: #000;
+    color: var(--accent-success);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    text-align: center;
+    padding: 4px;
+    font-size: 0.875rem;
+}
+
+#timer {
+    font-family: monospace;
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--accent-success);
+    margin: 12px 0;
+    display: inline-block;
+    background: #000;
+    padding: 4px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+}
+
+/* Video Preview */
+#video-container { 
+    position: relative; 
+    width: 100%; 
+    border-radius: 10px;
+    overflow: hidden;
+    background: #000;
+    border: 1px solid var(--border-color);
+}
+
+video#preview {
+    width: 100%;
+    display: block;
+    max-height: 500px;
+    object-fit: contain;
+}
+
+#selection-rect {
+    border: 2px dashed var(--accent-success);
+    background: rgba(16, 185, 129, 0.15);
+    position: absolute;
+    display: none;
+    pointer-events: none;
+}
+
+/* Timeline */
+#timelineContainer {
+    width: 100%;
+    height: 70px;
+    background: var(--bg-element);
+    position: relative;
+    overflow: hidden;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+}
+
+#trimControls {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 8px;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+#snapStatus {
+    font-size: 0.875rem;
+    color: var(--accent-success);
+    font-weight: 500;
+    margin-left: 8px;
+}
+</style>
+</head>
+<body>
+
+<div id="recorderUI">
+    <h2>Offline Silent Screen Recorder</h2>
+    
+    <div class="toolbar">
+        <button id="recordBtn">⏺ Record</button>
+        <button id="pauseBtn" disabled>⏸ Pause</button>
+        <button id="resumeBtn" disabled>▶ Resume</button>
+        <button id="stopBtn" disabled>⏹ Stop</button>
+        <button id="playBtn" disabled>▶ Play</button>
+        <button id="downloadBtn" disabled>💾 Download</button>
+    </div>
+
+    <div class="toolbar">
+        <button id="snapBtn">📸 Instant</button>
+        <div class="snapshot-group">
+            <input type="number" id="delaySeconds" value="5" min="1" max="60">
+            <button id="snapDelayBtn" style="background:transparent; border:none; padding:4px;">⏱️ Delayed Snapshot</button>
+        </div>
+        <button id="cropSnapBtn">✂️ Partial Crop</button>
+        <button id="refreshPreviewBtn" style="display:none;"></button> <!-- Hidden fix for reference error -->
+        <span id="snapStatus"></span>
+    </div>
+
+    <div>
+        <div id="timer">00:00</div>
+    </div>
+
+    <div id="video-container">
+        <video id="preview" controls playsinline></video>
+    </div>
+
+    <h3>Trim Timeline</h3>
+    <div id="timelineContainer"></div>
+    <div id="trimControls">
+        <span>Start: <span id="trimStartLabel">0s</span></span>
+        <span>End: <span id="trimEndLabel">0s</span></span>
+    </div>
+    
+    <div style="margin-top: 12px;">
+        <button id="trimBtn">✂️ Trim & Download</button>
+    </div>
+    
+    <canvas id="trimCanvas" style="display:none;"></canvas>
+</div>
+
+<script>
+let mediaRecorder;
+let recordedChunks = [];
+let recordedBlob;
+let combinedStream;
+let streamTrack; 
+let startTime, timerInterval;
+let trimStart = 0; // Added safety fallback references if used elsewhere
+let trimEnd = 1;
+
+const preview = document.getElementById("preview");
+const timelineContainer = document.getElementById("timelineContainer");
+const trimStartLabel = document.getElementById("trimStartLabel");
+const trimEndLabel = document.getElementById("trimEndLabel");
+const recordBtn = document.getElementById("recordBtn");
+const pauseBtn = document.getElementById("pauseBtn");
+const resumeBtn = document.getElementById("resumeBtn");
+const stopBtn = document.getElementById("stopBtn");
+const playBtn = document.getElementById("playBtn");
+const downloadBtn = document.getElementById("downloadBtn");
+const snapBtn = document.getElementById("snapBtn");
+const snapDelayBtn = document.getElementById("snapDelayBtn");
+const cropSnapBtn = document.getElementById("cropSnapBtn");
+const snapStatus = document.getElementById("snapStatus");
+const delayInput = document.getElementById("delaySeconds");
+
+let isSelecting = false;
+let startX, startY;
+
+function startTimer() {
+    startTime = Date.now() - (parseTime(document.getElementById("timer").textContent) || 0);
+    timerInterval = setInterval(() => {
+        let t = Date.now() - startTime;
+        let m = Math.floor(t / 60000);
+        let s = Math.floor(t / 1000) % 60;
+        document.getElementById("timer").textContent =
+            String(m).padStart(2, '0') + ":" + String(s).padStart(2, '0');
+    }, 1000);
+}
+function stopTimer() { clearInterval(timerInterval); }
+function parseTime(str) {
+    if (!str || str === "00:00") return 0;
+    const [m, s] = str.split(":").map(Number);
+    return (m * 60 + s) * 1000;
+}
+
+recordBtn.onclick = async () => {
+    try {
+        const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+        combinedStream = screenStream;
+        streamTrack = screenStream.getVideoTracks()[0]; 
+
+        preview.src = ""; 
+        preview.load(); 
+        preview.srcObject = combinedStream;
+        preview.muted = true;
+        await preview.play();
+
+        recordedChunks = [];
+        mediaRecorder = new MediaRecorder(combinedStream, { mimeType: "video/webm" });
+        
+        mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
+        
+        mediaRecorder.onstop = () => {
+            recordedBlob = new Blob(recordedChunks, { type: "video/webm" });
+            preview.srcObject = null;
+            preview.src = URL.createObjectURL(recordedBlob);
+            streamTrack = null; 
+            playBtn.disabled = false;
+            downloadBtn.disabled = false;
+        };
+
+        mediaRecorder.start();
+        document.getElementById("timer").textContent = "00:00";
+        startTimer();
+        recordBtn.classList.add("recording");
+        recordBtn.textContent = "Recording...";
+        pauseBtn.disabled = false;
+        stopBtn.disabled = false;
+    } catch (err) {
+        alert("Recording error: " + err.message);
+    }
+};
+
+pauseBtn.onclick = () => { mediaRecorder.pause(); pauseBtn.disabled = true; resumeBtn.disabled = false; stopTimer(); };
+resumeBtn.onclick = () => { mediaRecorder.resume(); pauseBtn.disabled = false; resumeBtn.disabled = true; startTimer(); };
+stopBtn.onclick = () => { mediaRecorder.stop(); combinedStream.getTracks().forEach(t => t.stop()); stopTimer(); pauseBtn.disabled = true; resumeBtn.disabled = true; stopBtn.disabled = true; recordBtn.classList.remove("recording"); recordBtn.textContent = "⏺ Record"; };
+playBtn.onclick = () => { preview.play(); };
+downloadBtn.onclick = () => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(recordedBlob);
+    a.download = `Recording-${Date.now()}.webm`;
+    a.click();
+};
+
+function downloadCanvas(canvas, name) {
+    const a = document.createElement("a");
+    a.href = canvas.toDataURL("image/png");
+    a.download = `${name}-${Date.now()}.png`;
+    a.click();
+    snapStatus.textContent = "✅ Captured!";
+    setTimeout(() => snapStatus.textContent = "", 2000);
+}
+
+async function captureNow(name) {
+    if (!preview.srcObject && (!preview.src || preview.src === window.location.href)) {
+        alert("No active stream or recorded video.");
+        return;
+    }
+
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+
+    if (preview.srcObject && streamTrack && streamTrack.readyState === 'live') {
+        try {
+            if ('ImageCapture' in window) {
+                const captureDevice = new ImageCapture(streamTrack);
+                const bitmap = await captureDevice.grabFrame();
+                canvas.width = bitmap.width;
+                canvas.height = bitmap.height;
+                ctx.drawImage(bitmap, 0, 0);
+            } else {
+                throw new Error("ImageCapture not supported");
+            }
+        } catch (e) {
+            canvas.width = preview.videoWidth;
+            canvas.height = preview.videoHeight;
+            ctx.drawImage(preview, 0, 0);
+        }
+    } else {
+        canvas.width = preview.videoWidth;
+        canvas.height = preview.videoHeight;
+        ctx.drawImage(preview, 0, 0);
+    }
+
+    if (canvas.width > 0) downloadCanvas(canvas, name);
+}
+
+snapBtn.onclick = () => captureNow("Instant-Snap");
+
+snapDelayBtn.onclick = function() {
+    let timeLeft = parseInt(delayInput.value) || 5;
+    const btn = this;
+    const originalText = btn.textContent;
+    btn.disabled = true;
+
+    const timer = setInterval(async () => {
+        snapStatus.textContent = `GET READY: ${timeLeft}s`;
+        btn.textContent = `WAIT (${timeLeft}s)`;
+        
+        if (timeLeft <= 0) {
+            clearInterval(timer);
+            await captureNow("Delayed-Snap"); 
+            btn.disabled = false;
+            btn.textContent = originalText;
+        }
+        timeLeft -= 1;
+    }, 1000);
+};
+
+const refreshPreviewBtn = document.getElementById("refreshPreviewBtn");
+if(refreshPreviewBtn) {
+    refreshPreviewBtn.onclick = async () => {
+        if (preview.srcObject) {
+            const currentStream = preview.srcObject;
+            preview.srcObject = null;
+            await new Promise(r => setTimeout(r, 50));
+            preview.srcObject = currentStream;
+            await preview.play();
+            snapStatus.textContent = "Preview Reset";
+            setTimeout(() => snapStatus.textContent = "", 1500);
+        }
+    };
+}
+
+cropSnapBtn.onclick = () => {
+    if (!preview.srcObject && !preview.src) return alert("No video source found.");
+    isSelecting = true;
+    preview.style.cursor = "crosshair";
+    snapStatus.textContent = "DRAG OVER VIDEO TO CROP";
+};
+
+preview.onmousedown = (e) => {
+    if (!isSelecting) return;
+    
+    const rect = preview.getBoundingClientRect();
+    startX = e.clientX - rect.left;
+    startY = e.clientY - rect.top;
+
+    let box = document.getElementById("selection-rect");
+    if (!box) {
+        box = document.createElement("div");
+        box.id = "selection-rect";
+        preview.parentElement.style.position = "relative";
+        preview.parentElement.appendChild(box);
+    }
+
+    box.style.left = startX + "px";
+    box.style.top = startY + "px";
+    box.style.width = "0px";
+    box.style.height = "0px";
+    box.style.display = "block";
+};
+
+document.addEventListener('mousemove', (e) => {
+    if (!isSelecting || startX === undefined) return;
+    
+    const box = document.getElementById("selection-rect");
+    const rect = preview.getBoundingClientRect();
+    
+    const curX = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+    const curY = Math.max(0, Math.min(e.clientY - rect.top, rect.height));
+
+    const width = Math.abs(curX - startX);
+    const height = Math.abs(curY - startY);
+    const left = Math.min(curX, startX);
+    const top = Math.min(curY, startY);
+
+    box.style.width = width + "px";
+    box.style.height = height + "px";
+    box.style.left = left + "px";
+    box.style.top = top + "px";
+});
+
+document.addEventListener('mouseup', async (e) => {
+    if (!isSelecting || startX === undefined) return;
+    
+    const box = document.getElementById("selection-rect");
+    const rect = preview.getBoundingClientRect();
+    
+    const scaleX = preview.videoWidth / rect.width;
+    const scaleY = preview.videoHeight / rect.height;
+
+    const finalX = parseFloat(box.style.left) * scaleX;
+    const finalY = parseFloat(box.style.top) * scaleY;
+    const finalW = parseFloat(box.style.width) * scaleX;
+    const finalH = parseFloat(box.style.height) * scaleY;
+
+    if (finalW > 10 && finalH > 10) {
+        const canvas = document.createElement("canvas");
+        canvas.width = finalW;
+        canvas.height = finalH;
+        const ctx = canvas.getContext("2d");
+        
+        ctx.drawImage(preview, finalX, finalY, finalW, finalH, 0, 0, finalW, finalH);
+        downloadCanvas(canvas, "Crop-Snap");
+    }
+
+    isSelecting = false;
+    startX = undefined;
+    preview.style.cursor = "default";
+    if (box) box.style.display = "none";
+    snapStatus.textContent = "";
+});
+
+document.getElementById("trimBtn").onclick = async () => {
+    if (!recordedBlob) return alert("No recording found.");
+    const video = document.createElement("video");
+    video.src = URL.createObjectURL(recordedBlob);
+    video.muted = true;
+    await video.play(); video.pause();
+
+    const canvas = document.getElementById("trimCanvas");
+    const ctx = canvas.getContext("2d");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    const stream = canvas.captureStream(30);
+    const recorder = new MediaRecorder(stream, { mimeType: "video/webm" });
+    let chunks = [];
+    recorder.ondataavailable = e => chunks.push(e.data);
+    recorder.onstop = () => {
+        const b = new Blob(chunks, { type: "video/webm" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(b);
+        a.download = "Trimmed.webm";
+        a.click();
+    };
+
+    recorder.start();
+    video.currentTime = trimStart * video.duration;
+    const draw = () => {
+        if (video.currentTime >= trimEnd * video.duration || video.paused) {
+            recorder.stop();
+            video.pause();
+            return;
+        }
+        ctx.drawImage(video, 0, 0);
+        requestAnimationFrame(draw);
+    };
+    video.play();
+    draw();
+};
+</script>
+
+</body>
+</html>
