@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Batch Download Manager + SHA-256 + Live Logs</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --text-color: #f8fafc;
+            --text-muted: #94a3b8;
+            --primary: #3b82f6;
+            --primary-hover: #2563eb;
+            --success: #22c55e;
+            --error: #ef4444;
+            --border: #334155;
+            --console-bg: #090d16;
+        }
+
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 2rem;
+            display: flex;
+            justify-content: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 900px;
+            background: var(--card-bg);
+            padding: 2rem;
+            border-radius: 1rem;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 1.5rem;
+        }
+
+        p.subtitle {
+            color: var(--text-muted);
+            font-size: 0.875rem;
+            margin: 0;
+        }
+
+        label {
+            display: block;
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+            font-size: 0.875rem;
+        }
+
+        textarea {
+            width: 100%;
+            height: 120px;
+            background: var(--bg-color);
+            color: var(--text-color);
+            border: 1px solid var(--border);
+            border-radius: 0.5rem;
+            padding: 0.75rem;
+            font-family: monospace;
+            font-size: 0.875rem;
+            resize: vertical;
+            box-sizing: border-box;
+        }
+
+        textarea:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        button {
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            font-weight: 600;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            align-self: flex-start;
+        }
+
+        button:hover {
+            background-color: var(--primary-hover);
+        }
+
+        button:disabled {
+            background-color: var(--border);
+            cursor: not-allowed;
+        }
+
+        .section {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .queue-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            max-height: 220px;
+            overflow-y: auto;
+            border: 1px solid var(--border);
+            border-radius: 0.5rem;
+            background: var(--bg-color);
+        }
+
+        .queue-item {
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+            font-size: 0.875rem;
+        }
+
+        .queue-item:last-child {
+            border-bottom: none;
+        }
+
+        .item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .url-text {
+            word-break: break-all;
+            color: var(--text-muted);
+            font-family: monospace;
+            font-size: 0.75rem;
+        }
+
+        .hash-text {
+            word-break: break-all;
+            color: #38bdf8;
+            font-family: monospace;
+            font-size: 0.75rem;
+        }
+
+        .status {
+            padding: 0.2rem 0.4rem;
+            border-radius: 0.25rem;
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+
+        .status.pending { background: #334155; color: var(--text-muted); }
+        .status.downloading { background: #1e3a8a; color: #93c5fd; }
+        .status.hashing { background: #431407; color: #fdba74; }
+        .status.success { background: #14532d; color: var(--success); }
+        .status.failed { background: #7f1d1d; color: #fca5a5; }
+
+        /* Live Console Styles */
+        .console-box {
+            background: var(--console-bg);
+            border: 1px solid var(--border);
+            border-radius: 0.5rem;
+            height: 180px;
+            overflow-y: auto;
+            padding: 0.75rem;
+            font-family: monospace;
+            font-size: 0.75rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .log-entry {
+            display: flex;
+            gap: 0.5rem;
+            line-height: 1.4;
+        }
+
+        .log-time {
+            color: var(--text-muted);
+            white-space: nowrap;
+        }
+
+        .log-msg.info { color: #f8fafc; }
+        .log-msg.success { color: var(--success); }
+        .log-msg.warn { color: #facc15; }
+        .log-msg.error { color: var(--error); }
+        .log-msg.net { color: #38bdf8; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div>
+        <h1>Batch Download Manager</h1>
+        <p class="subtitle">Sequential downloader with SHA-256 computation, filename appending, and a live activity console.</p>
+    </div>
+
+    <div class="section">
+        <label for="urlInput">Target URLs</label>
+        <textarea id="urlInput" placeholder="https://example.com/file1.mp3&#10;https://example.com/file2.mp3"></textarea>
+        <button id="startBtn" onclick="startDownloads()">Start Batch Process</button>
+    </div>
+
+    <div class="section">
+        <label>Download Queue Status</label>
+        <ul id="queueList" class="queue-list">
+            <li class="queue-item" style="justify-content: center; align-items: center; color: var(--text-muted); height: 40px;">Queue is empty</li>
+        </ul>
+    </div>
+
+    <div class="section">
+        <label>Live Activity Logs</label>
+        <div id="consoleBox" class="console-box">
+            <div class="log-entry"><span class="log-time">[--:--:--]</span> <span class="log-msg info">Console initialized. Ready to process batch queue.</span></div>
+        </div>
+    </div>
+</div>
+
+<script>
+function logMessage(text, type = 'info') {
+    const consoleBox = document.getElementById('consoleBox');
+    const now = new Date();
+    const timeStr = now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0');
+    
+    const div = document.createElement('div');
+    div.className = 'log-entry';
+    div.innerHTML = `<span class="log-time">[${timeStr}]</span> <span class="log-msg ${type}">${escapeHtml(text)}</span>`;
+    
+    consoleBox.appendChild(div);
+    consoleBox.scrollTop = consoleBox.scrollHeight; // Auto scroll to bottom
+}
+
+async function startDownloads() {
+    const input = document.getElementById('urlInput').value;
+    const startBtn = document.getElementById('startBtn');
+    const queueList = document.getElementById('queueList');
+
+    const urls = input.split('\n')
+        .map(u => u.trim())
+        .filter(u => u.length > 0);
+
+    if (urls.length === 0) {
+        alert('Please enter at least one valid URL.');
+        return;
+    }
+
+    startBtn.disabled = true;
+    queueList.innerHTML = '';
+    logMessage(`Starting batch queue with ${urls.length} target(s).`, 'info');
+
+    // Initialize queue UI items
+    const items = urls.map(url => {
+        const li = document.createElement('li');
+        li.className = 'queue-item';
+        li.innerHTML = `
+            <div class="item-header">
+                <span class="url-text">${escapeHtml(url)}</span>
+                <span class="status pending">Pending</span>
+            </div>
+            <div class="hash-text" style="display: none;"></div>
+        `;
+        queueList.appendChild(li);
+        return { 
+            url, 
+            statusEl: li.querySelector('.status'), 
+            hashEl: li.querySelector('.hash-text') 
+        };
+    });
+
+    // Process queue sequentially
+    for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        item.statusEl.className = 'status downloading';
+        item.statusEl.textContent = 'Downloading';
+
+        logMessage(`[Item ${i+1}/${items.length}] Initiating network request for: ${item.url}`, 'net');
+
+        try {
+            const startTime = performance.now();
+            
+            // 1. Fetch Request
+            const response = await fetch(item.url);
+            
+            // Log redirection info if redirected
+            if (response.redirected) {
+                logMessage(`[Item ${i+1}] Request was redirected to: ${response.url}`, 'warn');
+            }
+
+            logMessage(`[Item ${i+1}] Received response status: ${response.status} ${response.statusText}`, response.ok ? 'net' : 'error');
+
+            if (!response.ok) {
+                throw new Error(`HTTP status code error: ${response.status}`);
+            }
+
+            // 2. Stream/Read blob content
+            logMessage(`[Item ${i+1}] Reading response body into blob stream...`, 'info');
+            const blob = await response.blob();
+            const durationFetch = ((performance.now() - startTime) / 1000).toFixed(2);
+            logMessage(`[Item ${i+1}] Download completed in ${durationFetch}s. Blob size: ${(blob.size / 1024 / 1024).toFixed(2)} MB`, 'success');
+
+            // 3. Compute SHA-256 Hash
+            item.statusEl.className = 'status hashing';
+            item.statusEl.textContent = 'Hashing';
+            logMessage(`[Item ${i+1}] Converting blob to ArrayBuffer for cryptographic hashing...`, 'info');
+            
+            const hashStart = performance.now();
+            const arrayBuffer = await blob.arrayBuffer();
+            
+            logMessage(`[Item ${i+1}] Running crypto.subtle.digest(SHA-256)...`, 'info');
+            const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+            
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            const hashDuration = ((performance.now() - hashStart) / 1000).toFixed(2);
+            
+            logMessage(`[Item ${i+1}] SHA-256 generated in ${hashDuration}s: ${hashHex}`, 'success');
+
+            // Update UI with Hash
+            item.hashEl.style.display = 'block';
+            item.hashEl.textContent = `SHA-256: ${hashHex}`;
+
+            // 4. Construct Filename
+            const urlObj = new URL(item.url);
+            let originalName = urlObj.pathname.split('/').pop() || 'downloaded_file';
+            originalName = decodeURIComponent(originalName);
+
+            let baseName = originalName;
+            let extension = '';
+            const lastDotIndex = originalName.lastIndexOf('.');
+            if (lastDotIndex !== -1) {
+                baseName = originalName.substring(0, lastDotIndex);
+                extension = originalName.substring(lastDotIndex);
+            }
+
+            const newFilename = `${baseName}_${hashHex}${extension}`;
+            logMessage(`[Item ${i+1}] Target local filename mapped to: ${newFilename}`, 'info');
+
+            // 5. Trigger browser download anchor
+            logMessage(`[Item ${i+1}] Injecting temporary download link into DOM and clicking...`, 'info');
+            const blobUrl = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = blobUrl;
+            a.download = newFilename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(blobUrl);
+
+            item.statusEl.className = 'status success';
+            item.statusEl.textContent = 'Saved';
+            logMessage(`[Item ${i+1}] Successfully triggered browser download for ${newFilename}`, 'success');
+
+        } catch (error) {
+            console.error(error);
+            item.statusEl.className = 'status failed';
+            item.statusEl.textContent = 'Failed';
+            item.hashEl.style.display = 'block';
+            item.hashEl.textContent = `Error: ${error.message}`;
+            logMessage(`[Item ${i+1}] FAILED: ${error.message}`, 'error');
+        }
+
+        // Brief gap before next queue item
+        if (i < items.length - 1) {
+            logMessage(`Pausing 500ms before next queue item...`, 'info');
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+    }
+
+    startBtn.disabled = false;
+    logMessage(`Batch queue processing completed.`, 'success');
+}
+
+function escapeHtml(str) {
+    return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+}
+</script>
+
+</body>
+</html>
