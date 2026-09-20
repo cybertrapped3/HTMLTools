@@ -1,0 +1,784 @@
+﻿#DOWNLOAD PODCSATS THROUGH POWERSHELL
+function Debug-Code{ #Debug-Code -debugging $setDebug -message "THE EPISODE OBJECT: " -writeObject $episode
+	param(
+		[Parameter(Mandatory=$true)]
+		[bool]$debugging=$false,
+		[Parameter(Mandatory=$true)]
+		[string]$message,
+		[object]$writeObject=$null
+	)
+
+	if($debugging -eq $true){
+		Write-Host $message.ToUpper()
+	}
+
+	if($writeObject -ne $null){
+		($writeObject |  ConvertTo-Json)
+		#($writeObject |  ConvertTo-Json).Replace("//","@!@").Replace("/","")
+	}
+
+}
+function Raise-Error{ #getRSSObject -series $series -file $file
+	param(
+		[Parameter(Mandatory=$true)]
+		[string]$message,
+		[bool]$setDebug=$false
+	)
+	switch -Wildcard ( $message )
+	{    		
+    		'Fatal*'
+		{
+        		Write-Error -Message $message
+			exit
+    		}
+		'Error*'
+		{
+        		Write-Error -Message $message
+    		}
+    		'Warning*'
+    		{
+        		Write-Warning -Message $message
+    		}
+    		default
+    		{
+        		Write-Information $message
+    		}
+	}
+}
+function Export-PodcastLogger {
+    	param (
+        		[Parameter(Mandatory=$true)]
+        		[object]$Data,
+       		[Parameter(Mandatory=$true)]
+        		[string]$Podcast,
+        		[string]$DestinationPath = ".",
+ 		[bool]$setDebug=$false
+    	)
+
+	Debug-Code -debugging $setDebug -message "ENTERED FUNCTION: Export-PodcastLogger. PODCAST: $Podcast"
+
+    # 1. Show a quick visual summary in the console
+    Write-Host "`n--- Download Summary for $Podcast ---" -ForegroundColor Cyan
+
+    $Data | Select-Object Number,
+		Title, 
+                          	datePublished, 
+                          	@{Name="DescChars"; Expression={$_.Description.Length}} | 
+            Format-Table -AutoSize
+
+    try {
+        # 2. Resolve the path and generate filename
+        $resolvedPath = (Resolve-Path $DestinationPath).Path
+        $timestamp    = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
+        $fileName     = "podcasts_" + $Podcast + "_$timestamp.json"
+        $fullPath     = Join-Path -Path $resolvedPath -ChildPath $fileName
+
+        # 3. Save to JSON
+        $Data | ConvertTo-Json -Depth 10 | Set-Content -Path $fullPath -Encoding utf8 -ErrorAction Stop
+
+        Write-Host "[SUCCESS] Metadata logged to: $fullPath`n" -ForegroundColor Green
+    }
+    catch {
+        Write-Host "[ERROR] Could not save JSON: $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
+function getRSSObject{
+	param(
+		[Parameter(Mandatory=$true)]
+		[bool]$series,
+		[string]$file,
+		[bool]$setDebug=$false
+	)
+
+	$rss = "rss.csv;"
+
+	switch( $true ){
+		$series { $rss = ".\rssSeries.csv" }
+	}
+
+	if ($null -ne $file) {
+
+		if(Test-Path -Path $file){ 
+			$rss = $file;
+		} else { 
+			Raise-Error -message "Error: The file you provided does not exists: $file"
+		}
+
+	}
+
+	$podcasts = Import-Csv -Path $rss;
+	Write-Host "BELOW THE RSS CSV OBJECT OF PODCASTS"; 
+	return $podcasts	
+
+
+}
+function Get-XMLDocument{ #Get-XMLDocument -setDebug $setDebug -filename 1 -url "https://feeds.megaphone.fm/reutersworldnews" -podcast $podcastName
+    	param(
+		[Parameter(Mandatory=$true)]
+		[int]$filename,
+		[Parameter(Mandatory=$true)]
+		[string]$url, 
+		[Parameter(Mandatory=$true)]
+		[string]$podcast, 
+		[bool]$setDebug=$false
+    	)
+
+	[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+	[string]$adjustedFilename=$filename.ToString('000')
+	[string]$xmlFile=".\" + $adjustedFilename + ".xml"
+	Invoke-WebRequest -Uri $url -OutFile $xmlFile
+	$xmlDocument=[xml](Get-Content $xmlFile);
+
+	if($setDebug -eq $true){
+
+		Write-Host "xmlFile: "$xmlFile;
+
+		$xmlDocument.rss.channel.item | Select-Object title, pubDate, link | Out-Host
+
+		Write-Host "PODCAST XML DOCUMENT NUMBER OF ITEMS: "$xmlDocument.rss.channel.item.length;
+
+	}
+
+	[string]$HtmlFile=".\" + $podcast + ".html"
+
+	Export-PodcastToHtml -XmlDocument $xmlDocument -FilePath $HtmlFile
+	
+	return $xmlDocument
+
+}
+function sanitizeString{ #sanitizeString -setDebug $setDebug -InputString $InputString -MaxLength $MaxLength
+	param(
+		[bool]$setDebug=$false,
+		[Parameter(Mandatory=$true)]
+		[string]$InputString,
+		[int]$MaxLength = 100
+	)	
+
+	Debug-Code -debugging $setDebug -message "ENTERED FUNCTION: sanitizeString. STRING: $InputString"
+
+	# 1. Handle Length Safely (Avoid Substring errors if string is too short)
+	$shortString = $InputString.Substring(0, [Math]::Min($InputString.Length, $MaxLength))
+
+	Debug-Code -debugging $setDebug -message "Handle Length Safely (Avoid Substring errors if string is too short): $shortString "
+
+	# 2. Convert specific "Keepers" (Change instead of Delete)
+	# This says: "Find any |, . or : and replace it with a dash"
+	$clean = $shortString -replace '[|:]', ' -' -replace '&', 'AND' -replace '\?', '' -replace "\'", '' -replace ',', '' -replace "\/", '-' -replace "\!", '' -replace "\(", '-' -replace "\)", '-' -replace '"', ''
+	$clean = $clean -replace '\s+', ' '  # Reduces multiple spaces to a single space
+
+	Debug-Code -debugging $setDebug -message "Convert specific 'Keepers' (Change instead of Delete): $clean"
+
+	# 3. Define the "Nuclear Option" Regex
+	# [IO.Path]::GetInvalidFileNameChars() gets system-level illegal chars (\ / : * ? " < > |)
+	$invalidChars = [RegEx]::Escape(-join [IO.Path]::GetInvalidFileNameChars())
+	$customUnwanted = '[:#\?\(\)\[\]]' # Add your specific unwanted chars here
+	$fullRegex = "[$invalidChars$customUnwanted]"
+
+	Debug-Code -debugging $setDebug -message "Define the 'Nuclear Option' Regex: $clean"
+
+	# 4. Final Scrub
+	$clean = $clean -creplace '\P{IsBasicLatin}', '' # Nuke non-Latin (œ, €, ™, etc.)
+	$clean = $clean -replace $fullRegex, ''         # Nuke all illegal/unwanted symbols
+	$clean = $clean.Trim()                          # Remove leading/trailing whitespace
+
+	Debug-Code -debugging $setDebug -message "Final Scrub: $clean"
+
+	return $clean
+}
+function sanitizeDescription {
+    param(
+        [bool]$setDebug=$false,
+        [Parameter(Mandatory=$true)]
+        [string]$Description
+    )    
+
+    if ([string]::IsNullOrWhiteSpace($Description)) { return "function sanitizeDescription: No description provided." }
+
+    # 1. Strip HTML tags (Preserving content between them)
+    $cleanDescription = $Description -replace '<[^>]+>', ''
+
+    # 2. Decode HTML Entities (Handles &amp;, &quot;, \u0027, etc.)
+    # Note: [System.Net.WebUtility] is often more available than [System.Web.HttpUtility]
+    $cleanDescription = [System.Net.WebUtility]::HtmlDecode($cleanDescription)
+
+    # 3. Clean up specialized/broken encoding characters
+    # We use a single -replace with a map for efficiency
+    $mappings = @{
+        'Â|â|' = ''
+        '€™'    = "'"
+        '€“'    = "-"
+        '€¯'    = " "
+        '\\u0027' = "'"
+    }
+    foreach ($pattern in $mappings.Keys) {
+        $cleanDescription = $cleanDescription -replace $pattern, $mappings[$pattern]
+    }
+
+    # 4. SMART WHITESPACE CLEANUP
+    # Replace multiple SPACES/TABS with one space (preserves newlines!)
+    $cleanDescription = $cleanDescription -replace '[ \t]+', ' '
+    
+    # Trim leading/trailing whitespace from the whole block
+    $cleanDescription = $cleanDescription.Trim()
+
+    return $cleanDescription
+}
+function getXMLElementContent{ #getXMLElementContent -setDebug $setDebug -Data $data
+	param(
+		[bool]$setDebug=$false,
+		[Parameter(Mandatory=$true)]
+		[object]$data
+	)
+
+	Debug-Code -debugging $setDebug -message "ENTERED function getXMLElementContent with data: $data"
+
+	[string]$content = '';
+
+	if($data -is [System.String])
+	{ 
+
+		Debug-Code -debugging $setDebug -message "data is System.String"
+
+		$content = $data
+	}
+
+	if($data -is [System.Xml.XmlElement])
+	{
+		Debug-Code -debugging $setDebug -message "data is a System.Xml.XmlElement possibly with CDATA "
+
+		$content = $data.InnerText
+	}
+
+	if($data -is [System.Object[]])
+	{
+		Debug-Code -debugging $setDebug -message "data is System.Object[]. PROCESSING data[0]"
+
+		#@@@TODO EXPLORE System.Xml.XmlElement
+
+		if($setDebug){
+			foreach ($member in ($data[0] | Get-Member)) {
+
+			Write-Host "$($member.MemberType): $($member.Name)"
+
+			}
+		}
+
+            		$content = if ($data[0] -is [System.Xml.XmlElement]) { 
+                		$data[0].InnerText 
+            		} else { 
+                		$data[0]
+            		}
+	}
+
+	Debug-Code -debugging $setDebug -message "RETURNING content: $content"
+
+	return $content
+
+}
+function getEpisode{ #getEpisode -setDebug $setDebug -podcast $podcast.podcast -podcastNumber $podcastNumber -$podcastsNumberPadding $podcastsNumberPadding -item $item -datePublished $datePublished -episodeNumber $episodesCount -episodeNumberPadding $episodesPadding
+	param(
+		[bool]$setDebug=$false,
+		[Parameter(Mandatory=$true)]
+		[string]$podcast,
+		[Parameter(Mandatory=$true)]
+		[int]$podcastNumber,
+		[Parameter(Mandatory=$true)]
+		[int]$podcastsNumberPadding,
+		[Parameter(Mandatory=$true)]
+		[object]$item,
+		[Parameter(Mandatory=$true)]
+		[int]$datePublished,
+		[Parameter(Mandatory=$true)]
+		[int]$episodeNumber,
+		[Parameter(Mandatory=$true)]
+		[int]$episodeNumberPadding,
+		[Parameter(Mandatory=$true)]
+        		[bool]$omitDownload=$false
+	)
+
+	[string]$protoTitle = getXMLElementContent -setDebug $setDebug -Data $item.title
+
+	Debug-Code -debugging $setDebug -message "PROTOTITLE SET: $protoTitle"
+
+	$title = sanitizeString -setDebug $setDebug -InputString $protoTitle -MaxLength 100
+
+	Debug-Code -debugging $setDebug -message "SANITIZED TITLE: $title"
+
+	$filename = ".\{0:D$podcastsNumberPadding}_{1:D$episodeNumberPadding}_{2}_{3}_{4}.mp3" -f $podcastNumber, $episodeNumber, $podcast, $datePublished, $title
+
+	Write-Host "THE FILENAME: $filename **************************" -ForegroundColor Green
+
+	if($omitDownload -ne $true -AND $item.enclosure.url -ne $null){
+
+		#Debug-Code -debugging $setDebug -message "DOWNLOADING TO FILENAME: $filename"
+
+		#Debug-Code -debugging $true -message "DOWNLOADING PODCAST $podcast EPISODE $filename"
+
+		#Invoke-WebRequest -Uri $item.enclosure.url -OutFile $filename
+
+		# 2. Attempt Download
+		[int]$useBits = 0
+		#if (Get-Module -ListAvailable BitsTransfer) {
+		if ($useBits -eq 1) {
+   			try {
+				Write-Host "Using BITS for: $safeTitle" -ForegroundColor Cyan
+				# -ErrorAction Stop ensures it jumps to 'catch' if BITS fails to start
+				Start-BitsTransfer -Source $item.enclosure.url -Destination $filename -ErrorAction Stop
+			}
+			catch {
+				Write-Warning "BITS failed. Falling back to Invoke-WebRequest..."
+				Invoke-WebRequest -Uri $item.enclosure.url -OutFile $filename -UseBasicParsing
+			}
+		}
+		else {
+			Write-Host "BitsTransfer module not found. Using Invoke-WebRequest for: $safeTitle" -ForegroundColor Yellow
+			Invoke-WebRequest -Uri $item.enclosure.url -OutFile $filename -UseBasicParsing
+		}
+
+	}
+
+	$episode = [PSCustomObject]@{
+	    	number = $episodeNumber
+	   	title = $title
+	    	datePublished = $datePublished
+	    	downloadUrl = $item.enclosure.url
+	    	filename = $filename
+		description =  if ([string]::IsNullOrWhiteSpace($item.description)) { 
+				"No description provided." 
+			} else { 
+				sanitizeDescription -setDebug $setDebug -Description $(getXMLElementContent -setDebug $setDebug -Data $item.description)
+			}
+	}
+
+	$theTitle = $episode.title
+
+	Write-Host "THE EPISODE TITLE: $theTitle **************************" -ForegroundColor Green
+
+	return $episode
+
+}
+function Export-PodcastToHtml {
+    param(
+        [Parameter(Mandatory=$true)]
+        $XmlDocument,
+        [string]$FilePath = "PodcastManager.html"
+    )
+
+    $css = @"
+    <style>
+        body { font-family: -apple-system, system-ui, sans-serif; line-height: 1.6; max-width: 1000px; margin: 0 auto; padding: 20px; background: #f0f2f5; color: #1c1e21; }
+        .controls { position: sticky; top: 10px; background: #ffffff; padding: 20px; z-index: 1000; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); border: 1px solid #ddd; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+        #progress-container { width: 100%; height: 8px; background: #eee; border-radius: 4px; margin-top: 10px; display: none; overflow: hidden; flex-basis: 100%; }
+        #progress-bar { width: 0%; height: 100%; background: #28a745; transition: width 0.3s; }
+        .episode { background: white; padding: 20px; margin-bottom: 15px; border-radius: 12px; border: 2px solid transparent; transition: all 0.2s ease; cursor: pointer; position: relative; }
+        .episode:hover { border-color: #ccd0d5; }
+        .episode.selected { border-color: #007bff; background: #e7f3ff; }
+        .description { white-space: pre-wrap; margin-top: 15px; font-family: 'Courier New', Courier, monospace; background: #fafafa; padding: 15px; border-radius: 8px; border: 1px solid #eee; line-height: 1.4; font-size: 0.9em; }
+        .select-indicator { position: absolute; top: 20px; right: 20px; width: 24px; height: 24px; border: 2px solid #ddd; border-radius: 50%; background: white; display: flex; align-items: center; justify-content: center; font-weight: bold; }
+        .episode.selected .select-indicator { background: #007bff; border-color: #007bff; color: white; }
+        .episode.selected .select-indicator::after { content: '✓'; }
+        button { padding: 10px 16px; border-radius: 8px; border: none; font-weight: 600; cursor: pointer; }
+        .btn-select { background: #6c757d; color: white; }
+        .btn-print { background: #28a745; color: white; }
+        .btn-download { background: #fd7e14; color: white; }
+        input { padding: 8px; border: 1px solid #ddd; border-radius: 6px; }
+        #count-display { margin-left: auto; font-weight: bold; color: #007bff; }
+        @media print { .controls, audio, .no-print, .select-indicator { display: none !important; } .episode { display: none !important; } .episode.selected { display: block !important; border: none; border-bottom: 1px solid #eee; page-break-inside: avoid; } }
+    </style>
+"@
+
+    $js = @"
+    <script>
+        function toggleSelect(div) {
+            if (event.target.tagName === 'AUDIO' || event.target.tagName === 'SOURCE') return;
+            div.classList.toggle('selected');
+            updateCount();
+        }
+        function updateCount() {
+            const count = document.querySelectorAll('.episode.selected').length;
+            const display = document.getElementById('count-display');
+            display.innerText = count + " items selected";
+            display.style.color = '#007bff';
+        }
+        function filterItems() {
+            const text = document.getElementById('search').value.toLowerCase();
+            const start = new Date(document.getElementById('start').value || '1900-01-01');
+            const end = new Date(document.getElementById('end').value || '2099-01-01');
+            document.querySelectorAll('.episode').forEach(el => {
+                const title = el.dataset.title.toLowerCase();
+                const date = new Date(el.dataset.date);
+                const isMatch = title.includes(text) && date >= start && date <= end;
+                el.style.display = isMatch ? 'block' : 'none';
+            });
+        }
+        function selectAllVisible() {
+            document.querySelectorAll('.episode:not([style*="display: none"])').forEach(el => el.classList.add('selected'));
+            updateCount();
+        }
+        function deselectAll() {
+            document.querySelectorAll('.episode').forEach(el => el.classList.remove('selected'));
+            updateCount();
+        }
+        async function downloadSelected() {
+            const selected = Array.from(document.querySelectorAll('.episode.selected'));
+            if (selected.length === 0) return;
+            const pContainer = document.getElementById('progress-container');
+            const pBar = document.getElementById('progress-bar');
+            const statusText = document.getElementById('count-display');
+            pContainer.style.display = 'block';
+            for (let i = 0; i < selected.length; i++) {
+                const ep = selected[i];
+                const url = ep.dataset.url;
+                const fileName = ep.dataset.title + ".mp3";
+                statusText.innerText = "Downloading " + (i + 1) + " of " + selected.length + "...";
+                pBar.style.width = ((i + 1) / selected.length * 100) + '%';
+                try {
+                    const response = await fetch(url);
+                    const blob = await response.blob();
+                    const bUrl = window.URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = bUrl;
+                    link.download = fileName;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    setTimeout(() => window.URL.revokeObjectURL(bUrl), 10000);
+                    await new Promise(r => setTimeout(r, 2500)); 
+                } catch (e) {
+                    const link = document.createElement('a');
+                    link.href = url; link.target = "_blank"; link.click();
+                    await new Promise(r => setTimeout(r, 3000));
+                }
+            }
+            statusText.innerText = "All Downloads Finished!";
+            statusText.style.color = "#28a745";
+            setTimeout(() => { pContainer.style.display = 'none'; }, 5000);
+        }
+    </script>
+"@
+
+    $htmlHeader = @"
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>Podcast Manager</title>
+        $css
+        $js
+    </head>
+    <body>
+        <div class="controls no-print">
+            <input type="text" id="search" placeholder="Search..." onkeyup="filterItems()">
+            <input type="date" id="start" onchange="filterItems()">
+            <input type="date" id="end" onchange="filterItems()">
+            <button class="btn-select" onclick="selectAllVisible()">Select All Visible</button>
+            <button class="btn-select" onclick="deselectAll()">Clear</button>
+            <button class="btn-print" onclick="window.print()">Print</button>
+            <button class="btn-download" onclick="downloadSelected()">Download Selected</button>
+            <span id="count-display">0 items selected</span>
+            <div id="progress-container"><div id="progress-bar"></div></div>
+        </div>
+"@
+
+    $episodeHtml = $XmlDocument.rss.channel.item | 
+        Sort-Object { $cleanDate = ($_.pubDate -replace '^[A-Za-z]{3},\s*' -replace '\s[A-Z]{3,4}$'); [datetime] $cleanDate } -Descending | 
+        ForEach-Object {
+            $cleanDate = ($_.pubDate -replace '^[A-Za-z]{3},\s*' -replace '\s[A-Z]{3,4}$')
+            $rawDate = [datetime] $cleanDate
+            $isoDate = $rawDate.ToString("yyyy-MM-dd")
+            
+            # --- CDATA FIX ---
+            # We explicitly check for XmlElement types and extract the InnerText
+            $rawDesc = if ($_.'description' -is [System.Xml.XmlElement]) { 
+                $_.'description'.InnerText 
+            } else { 
+                $_.'description' 
+            }
+
+	if ([string]::IsNullOrWhiteSpace($rawDesc)) { 
+		$cleanDesc = "No description provided." 
+	} else { 
+		$cleanDesc = sanitizeDescription -Description ([string]$rawDesc)
+	}
+
+            $safeTitle = $_.title -replace '[\\\/:*?"<>|]', ''
+            
+            @"
+        <div class="episode" onclick="toggleSelect(this)" data-date="$isoDate" data-title="$safeTitle" data-url="$($_.enclosure.url)">
+            <div class="select-indicator"></div>
+            <small>$($_.pubDate)</small>
+            <h2>$($_.title)</h2>
+            <audio controls preload="none"><source src="$($_.enclosure.url)"></audio>
+            <div class="description">$cleanDesc</div>
+        </div>
+"@
+        }
+
+	$FilePath = ".\html\" + $FilePath
+
+    $finalHtml = $htmlHeader + ($episodeHtml -join "`n") + "</body></html>"
+    $finalHtml | Out-File -FilePath $FilePath -Encoding utf8
+}
+function wrapItUp{ #wrapItUp -clean $true
+    	param(
+		[Parameter(Mandatory=$true)]
+		[bool]$clean=$true
+    	)
+	
+	if($clean -eq $true){
+
+		$today = $timestamp    = Get-Date -Format "yyyyMMdd"
+
+		$todayDirectory = "G:\PODCASTS\download\archive\$today"
+
+		mkdir $todayDirectory
+
+		mv G:\PODCASTS\download\*.xml -Destination $todayDirectory
+
+		mv G:\PODCASTS\download\*.json -Destination $todayDirectory 
+
+	}
+
+	cp .\*.mp3 -Destination H:\ -verbose
+
+	mv .\*.mp3 -Destination "G:\PODCASTS\download\archive\mp3" -verbose
+
+}
+function Download-Podcasts{
+    	param(
+		[string]$file,
+		[Parameter(Mandatory=$true)]
+		[bool]$series, 
+		[Parameter(Mandatory=$true)]
+		[int]$dateLimit,
+		[bool]$setDebug=$false,
+        		[bool]$omitDownload=$true
+    	)
+
+	# Move this to the top of your .ps1 file
+
+	Add-Type -AssemblyName System.Web
+
+	$podcasts = getRSSObject -series $series -file $file
+	$podcasts | Format-Table;
+
+	[int]$counter=0;
+	[int]$podcastNumber=0;	
+	[int]$podcastsNumberPadding=$podcastNumber.ToString().Length;
+
+	$podcastsNumberPadding=$podcastsNumberPadding+2
+
+	Debug-Code -debugging $setDebug -message 'START LOOP FOREACH PODCAST OF THE PODCASTS CSV DERIVED OBJECT'
+
+	foreach($podcast in $podcasts)
+	{
+
+		$podcastNumber++
+
+		[string]$podcastName = $podcast.podcast
+
+		Debug-Code -debugging $setDebug -message "PODCAST: $podcastName"
+
+		if($podcast.download -ne "no"){
+
+			#get podcast RSS XML file
+			$xmlDocument = Get-XMLDocument -setDebug $setDebug -filename $podcastNumber -url $podcast.rssFeed -podcast $podcastName
+
+			if( $podcast.dateStart -ne 1 ){
+
+				[int]$dateStart = [datetime]::parseexact($podcast.dateStart, 'MM/dd/yyyy', $null).toString("yyyyMMdd"); 
+
+			} else { [int]$dateStart = $dateLimit }
+
+			if( $podcast.dateStop -ne 1 ){
+
+				[int]$dateStop = [datetime]::parseexact($podcast.dateStop, 'MM/dd/yyyy', $null).toString("yyyyMMdd")
+
+			} else { [int]$dateStop = Get-Date -Format "yyyyMMdd" }
+
+			Debug-Code -debugging $setDebug -message "DATES: dateStart=$dateStart dateStop=$dateStop"
+
+			[int]$episodeCount=0;
+
+			$episodes = @();
+
+			[int]$numbeOfEpisodes = $xmlDocument.rss.channel.item.Length
+
+			[int]$episodesPadding=$numbeOfEpisodes.ToString().Length
+
+			Debug-Code -debugging $setDebug -message "NUMBER OF EPISODES for $podcast.podcast: $numbeOfEpisodes"
+			
+			$episodesPadding=$episodesPadding+1
+
+			Debug-Code -debugging $setDebug -message "EPISODES PADDING for $podcast.podcast: $episodesPadding"
+
+			Debug-Code -debugging $setDebug -message "START LOOP FOREACH PODCAST'S EPISODE"
+
+# Assuming $items contains your RSS feed entries
+#			$sortedItems = $xmlDocument.rss.channel.item | Sort-Object { $cleanDate = ($_.pubDate -replace '^[A-Za-z]{3},\s*' -replace '\s[A-Z]{3,4}$'); [datetime] $cleanDate }
+#			foreach($item in $sortedItems){
+
+			$xmlDocument.rss.channel.item |
+			Sort-Object { $cleanDate = ($_.pubDate -replace '^[A-Za-z]{3},\s*' -replace '\s[A-Z]{3,4}$'); [datetime] $cleanDate } |
+			ForEach-Object {
+        
+
+				$item = $_ # This lets you keep using $item in your existing code!
+
+				$episodeCount++
+
+				$numbeOfEpisodes--
+
+				[int]$datePublished= [int]([dateTime]::parseexact(($item.pubDate).Split(',')[1].Split(' ')[1]+" "+($item.pubDate).Split(',')[1].Split(' ')[2]+" "+($item.pubDate).Split(',')[1].Split(' ')[3],"d MMM yyyy", $null).ToString("yyyyMMdd"));
+
+				if($($datePublished -eq $dateStart -OR $datePublished -gt $dateStart) -AND $($datePublished -eq $dateStop -OR $datePublished -le $dateStop) -AND $item.enclosure.url -ne $null)
+				{
+
+					Debug-Code -debugging $setDebug -message "GETTING EPISODE NUMBER: $episodeCount"
+
+					Debug-Code -debugging $setDebug -message "getEpisode -setDebug $setDebug -podcast $podcastName -podcastNumber $podcastNumber -podcastsNumberPadding $podcastsNumberPadding -item $item -datePublished $datePublished -episodeNumber $episodeCount -episodeNumberPadding $episodesPadding"
+
+					$episodes += getEpisode -setDebug $setDebug -podcast $podcastName -podcastNumber $podcastNumber -podcastsNumberPadding $podcastsNumberPadding -item $item -datePublished $datePublished -episodeNumber $episodeCount -episodeNumberPadding $episodesPadding -omitDownload $omitDownload
+
+				} 
+		
+			}
+
+			$podcast | Add-Member -MemberType NoteProperty -Name 'episodes' -value $episodes
+
+			Export-PodcastLogger -setDebug $setDebug -Podcast $podcastName -Data $episodes
+
+		} #end of if download -ne no
+
+	}
+
+	Export-PodcastLogger -setDebug $setDebug -Podcast "ALL" -Data $podcasts
+}
+function tidyDownloads{ # tidyDownloads -clean $true -thisPath 'H:\PODCASTS\download\'
+    	param(
+		[Parameter(Mandatory=$true)]
+		[bool]$clean=$true,
+		[Parameter(Mandatory=$true)]
+		[string]$thisPath="G:\PODCASTS\download\"
+    	)
+
+               [string]$mp3ArchiveLogs = Join-Path $thisPath "archive"
+
+               [string]$mp3ArchiveFiles = Join-Path $mp3ArchiveLogs "mp3"
+	
+	if($clean -eq $true){
+		$today = Get-Date -Format "yyyyMMdd"
+
+		$todayDirectoryLogs = Join-Path $mp3ArchiveLogs $today
+
+		$todayDirectoryFiles = Join-Path $mp3ArchiveFiles $today
+
+		Write-Host "Creating archive directory: $todayDirectoryLogs" -ForegroundColor Cyan
+        
+		# Force/No errors if it already exists
+		New-Item -ItemType Directory -Path $todayDirectoryLogs -Force | Out-Null
+
+		# Move metadata files
+		if (Test-Path "$thisPath*.xml") { Move-Item "$thisPath*.xml" -Destination $todayDirectoryLogs -verbose }
+		if (Test-Path "$thisPath*.json") { Move-Item "$thisPath*.json" -Destination $todayDirectoryLogs -verbose }
+
+		Write-Host "Moving MP3 Podcasts FIles: $todayDirectoryFiles" -ForegroundColor Cyan
+        
+		# Force/No errors if it already exists
+		New-Item -ItemType Directory -Path $todayDirectoryFiles -Force | Out-Null
+
+		# Move metadata files
+		if (Test-Path "$thisPath*.mp3") { Move-Item "$thisPath*.mp3" -Destination $todayDirectoryFiles -verbose }
+
+	}
+
+}
+function wrapItUp { #wrapItUp -clean $true -mp3Player 'H:\' -thisPath 'G:\PODCASTS\download\'
+    param(
+        [Parameter(Mandatory=$true)]
+        [bool]$clean=$true,
+
+        [Parameter(Mandatory=$true)]
+        [string]$mp3Player="H:\",
+
+        [Parameter(Mandatory=$true)]
+        [string]$thisPath="G:\PODCASTS\download\"
+    )
+
+    # Use Join-Path for cleaner, safer path combining
+    [string]$mp3Archive = Join-Path $thisPath "archive"
+	
+    if ($clean) {
+        $today = Get-Date -Format "yyyyMMdd"
+        $todayDirectory = Join-Path $mp3Archive $today
+
+        Write-Host "Creating archive directory: $todayDirectory" -ForegroundColor Cyan
+        
+        # Force/No errors if it already exists
+        New-Item -ItemType Directory -Path $todayDirectory -Force | Out-Null
+
+        # Move metadata files
+        if (Test-Path "$thisPath*.xml") { Move-Item "$thisPath*.xml" -Destination $todayDirectory }
+        if (Test-Path "$thisPath*.json") { Move-Item "$thisPath*.json" -Destination $todayDirectory }
+    }
+
+    # --- ADJUSTMENT: Conditional MP3 Player Deletion ---
+    if (Test-Path "$mp3Player*.mp3") {
+        $playerFiles = Get-ChildItem -Path "$mp3Player*.mp3"
+        $todayDate = (Get-Date).Date
+
+        foreach ($file in $playerFiles) {
+            # Check if the file was created today
+            if ($file.CreationTime.Date -eq $todayDate) {
+                Write-Host "Warning: '$($file.Name)' was created TODAY." -ForegroundColor Yellow
+                
+                # Prompt loop until valid input is received
+                while ($true) {
+                    $choice = Read-Host "Type 'y' to Confirm deletion, 'keep' to bypass, or 'cancel' to stop program"
+                    $choice = $choice.Trim().ToLower()
+
+                    if ($choice -eq 'y') {
+                        Remove-Item -Path $file.FullName -Verbose
+                        break
+                    } elseif ($choice -eq 'keep') {
+                        Write-Host "Skipping deletion for: $($file.Name)" -ForegroundColor Green
+                        break
+                    } elseif ($choice -eq 'cancel') {
+                        Write-Host "Exiting program gently as requested..." -ForegroundColor Orange
+                        return # Hard stop: Exits the entire wrapItUp function immediately
+                    } else {
+                        Write-Host "Invalid input. Please type 'y' or 'keep'." -ForegroundColor Red
+                    }
+                }
+            } else {
+                # If it's an older file, delete it automatically
+                Remove-Item -Path $file.FullName -Verbose
+            }
+        }
+    }
+
+    # --- Copy & Archive New Podcasts ---
+    if (Test-Path "$thisPath*.mp3") {
+        # Copy recently downloaded podcasts to MP3 Player
+        Copy-Item "$thisPath*.mp3" -Destination $mp3Player -Verbose
+
+        # Archive recently downloaded podcasts
+        [string]$mp3ArchiveMP3 = Join-Path $mp3Archive "mp3"
+        
+        # Ensure the archive/mp3 directory exists
+        New-Item -ItemType Directory -Path $mp3ArchiveMP3 -Force | Out-Null
+        
+        Move-Item "$thisPath*.mp3" -Destination $mp3ArchiveMP3 -Verbose
+    } else {
+        Write-Host "No new MP3 files found in $thisPath to copy." -ForegroundColor Yellow
+    }
+}
+
+#$setFalse=$false; Download-Podcasts -setDebug $true -series $false -dateLimit 20260727 -file ".\rss.csv" -omitDownload $true
+
+#$setFalse=$false; Download-Podcasts -setDebug $false -series $false -dateLimit 20260829 -file ".\rss.csv" -omitDownload $true
+
+#$setFalse=$false; Download-Podcasts -setDebug $false -series $false -dateLimit 20260727 -file ".\rss.csv" -omitDownload $false
+
+#wrapItUp -clean $true -mp3Player 'H:\' -thisPath 'G:\PODCASTS\download\'
