@@ -1,0 +1,312 @@
+﻿$Subject = "20260720"
+$FolderToZip = Join-Path "G:\PODCASTS\download\archive\mp3" $Subject
+$ZipDestination = "C:\Users\pac"
+$TemporaryWorkingFolder = Join-Path "C:\Users\pac" "tmp$Subject"
+
+New-HashedZipArchive -FolderPath $FolderToZip -RenameFiles $true -FinalPath $ZipDestination -TmpPath $TemporaryWorkingFolder -RemoveTmpPath $true
+
+function New-HashedZipArchive { 
+    param (
+        [Parameter(Mandatory=$true)]
+        [string]$FolderPath,
+        [int]$HashLength = 64,
+        [bool]$RenameFiles = $true,
+        [string]$FinalPath = $null,
+        [string]$TmpPath = $null,
+        [bool]$RemoveTmpPath = $true
+    )
+
+	$timestamp = Get-Date
+	Write-Host $timestamp -ForegroundColor Cyan
+	Write-Host "FolderPath: $FolderPath" -ForegroundColor Cyan
+	Write-Host "FinalPath: $FinalPath" -ForegroundColor Cyan
+	Write-Host "TmpPath: $TmpPath" -ForegroundColor Cyan
+
+	if($TmpPath){
+		
+        		if ((Test-Path $TmpPath) -eq $false) { 
+
+			New-Item -ItemType Directory -Path $TmpPath | Out-Null  
+
+		}
+
+		$tempPath = $TmpPath
+
+		Write-Host "Custom temporary path $TmpPath = $tempPath" -ForegroundColor Yellow
+
+	} else { $tempPath = Join-Path $env:TEMP ([Guid]::NewGuid().ToString()) }
+
+	Write-Host "Working space $tempPath" -ForegroundColor Yellow
+
+   	$folder = Get-Item $FolderPath
+    	$parentDir = $folder.Parent.FullName
+
+	if($RenameFiles){
+
+		$zipBaseName = "$($folder.Name)_HashedNames"
+
+	} else {
+
+		$zipBaseName = "$($folder.Name)_OrigNames"
+
+	} 
+
+    	$manifestPath = Join-Path $tempPath "manifest.txt"
+
+	if($FinalPath){
+
+		$timestamp = Get-Date
+		Write-Host $timestamp -ForegroundColor Cyan
+
+		$timestamp = Get-Date
+		Write-Host "TESTING FOR FINAL PATH: $FinalPath" -ForegroundColor Cyan
+		
+        		if (Test-Path $FinalPath) { 
+
+			$parentDir = $FinalPath
+
+			$timestamp = Get-Date
+			Write-Host $timestamp -ForegroundColor Cyan
+
+			$timestamp = Get-Date
+			Write-Host "FINAL PATH EXISTS. PARENTDIRPATH: $ParentDir" -ForegroundColor Cyan
+
+		}
+
+	}
+    
+    try {
+
+	$timestamp = Get-Date
+	Write-Host $timestamp -ForegroundColor Cyan
+	Write-Host "Preparing workspace..." -ForegroundColor Cyan
+	Write-Host "WORKSPACE FOLDER:" -ForegroundColor Yellow
+
+	Dir $FolderPath
+		
+        	if ((Test-Path $tempPath) -eq $false) { 
+
+        		New-Item -ItemType Directory -Path $tempPath | Out-Null
+
+	}
+
+        	Copy-Item -Path "$($folder.FullName)\*" -Destination $tempPath -Recurse -Verbose
+
+        	$tempFiles = Get-ChildItem -Path $tempPath -File -Recurse
+        	$manifestContent = @("Original Name | Hashed Path | Full SHA256")
+        	$manifestContent += ("-" * 80)
+
+	foreach ($file in $tempFiles) {
+
+		$fileName = $file.Name
+
+		$timestamp = Get-Date
+		Write-Host $timestamp -ForegroundColor Cyan
+		Write-Host "PROCESSING A FILE: $fileName" -ForegroundColor Cyan
+
+		$fullHash = (Get-FileHash -Path $file.FullName -Algorithm SHA256).Hash
+		$shortHash = $fullHash.Substring(0, $HashLength)
+            
+		# Get the relative directory structure
+		$relativeDir = Split-Path ($file.FullName.Replace($tempPath, "")) -Parent
+		$relativeDir = $relativeDir.TrimStart('\').TrimStart('/')
+
+		if($RenameFiles){
+            
+			$protoName = "$($file.BaseName)_$($shortHash)"
+
+			# 1. Handle Length Safely (Avoid Substring errors if string is too short)
+			$shortName = $protoName.Substring(0, [Math]::Min($protoName.Length, 200))
+            
+            			$newName = "$shortName$($file.Extension)"
+
+			$fullname = $file.FullName	
+
+			Write-Host "FILE FULLNAME: $fullname"
+            
+            			# FIXED: Handle files in the root directory smoothly
+            			if ([string]::IsNullOrWhiteSpace($relativeDir)) {
+                			$hashedRelativePath = $newName
+            			} else {
+                			$hashedRelativePath = Join-Path $relativeDir $newName
+            			}	
+
+			Rename-Item -Path $file.FullName -NewName $newName
+
+		} else {
+            
+            			$newName = "$($file.BaseName)_$($shortHash)$($file.Extension)"	
+            
+            			# FIXED: Handle files in the root directory smoothly
+            			if ([string]::IsNullOrWhiteSpace($relativeDir)) {
+                		$hashedRelativePath = $file.Name
+
+            		} else {
+                		$hashedRelativePath = Join-Path $relativeDir $file.Name
+            		}
+
+	}
+            
+            	# Log the proper path to manifest
+            	$manifestContent += "$($file.Name) | $hashedRelativePath | $fullHash"
+
+        }
+
+	$timestamp = Get-Date
+	Write-Host $timestamp -ForegroundColor Cyan
+
+        	$manifestContent | Out-File -FilePath $manifestPath -Encoding utf8 -verbose
+
+	$timestamp = Get-Date
+	Write-Host $timestamp -ForegroundColor Cyan
+
+        	$initialZipPath = Join-Path $parentDir "$zipBaseName.zip"
+
+	Write-Host "PARENT DIR: $parentDir" -ForegroundColor Green
+
+	Write-Host "INITIAL ZIP PATH: $initialZipPath" -ForegroundColor Green
+
+        	if (Test-Path $initialZipPath) { 
+
+		Write-Host "SUPPOSED TO REMOVE INITIAL PATH $initialZipPath BUT NOT REMOVING FOR NOW" -ForegroundColor Green
+
+		#Remove-Item $initialZipPath 
+
+       	 }
+
+	$timestamp = Get-Date
+	Write-Host $timestamp -ForegroundColor Cyan        
+        	Write-Host "Compressing with manifest to destination $initialZipPath" -ForegroundColor Cyan
+
+        	Compress-Archive -Path "$tempPath\*" -DestinationPath $initialZipPath  -verbose
+
+	$timestamp = Get-Date
+	Write-Host $timestamp -ForegroundColor Cyan        
+        	Write-Host "Getting Archive Hash" -ForegroundColor Green
+
+        	$zipHash = (Get-FileHash -Path $initialZipPath -Algorithm SHA256).Hash
+        
+        	Write-Host "Archive Hash: $zipHash" -ForegroundColor Green
+
+        	$shortZipHash = $zipHash.Substring(0, $HashLength)
+        	$finalZipPath = Join-Path $parentDir "$($zipBaseName)_$($shortZipHash).zip"
+        
+        	Rename-Item -Path $initialZipPath -NewName (Split-Path $finalZipPath -Leaf)
+
+	$timestamp = Get-Date
+	Write-Host $timestamp -ForegroundColor Cyan
+        	Write-Host "Success! Archive created at: $finalZipPath" -ForegroundColor Green
+
+    }
+    finally {
+        if (Test-Path $tempPath) {
+
+		$timestamp = Get-Date
+		Write-Host $timestamp -ForegroundColor Cyan
+
+	if($RemoveTmpPath){
+
+		Write-Host "REMOVING TEMP PATH $tempPath" -ForegroundColor Green
+
+            		Remove-Item -Path $tempPath -Recurse -Force
+
+	} else { 
+
+		Write-Host "WARNING: NOT REMOVING TEMP PATH $tempPath" -ForegroundColor Orange
+
+	}
+
+        }
+    }
+}
+
+function Test-HashedZipArchive { #Test-HashedZipArchive -ZipPath "C:\Path\To\YourArchive_A1B2C3D4.zip" -ExpandedPath "OPTIONALFolderToCopyExpanded" -TmpPath "OPTIONALWorkspaceFolder"
+    param (
+        [Parameter(Mandatory=$true)]
+        [string]$ZipPath,
+        [string]$ExpandedPath = $null,
+        [string]$TmpPath = $null
+    )
+
+    $zipFile = Get-Item $ZipPath
+
+	if($TmpPath){
+
+		if ((Test-Path $TmpPath) -eq $false) { 
+
+			New-Item -ItemType Directory -Path $TmpPath | Out-Null 
+
+		}
+
+		$tempExtract = $TmpPath    		
+
+	} else { $tempExtract = Join-Path $env:TEMP ([Guid]::NewGuid().ToString()) }
+
+    try {
+        Write-Host "Extracting for verification..." -ForegroundColor Cyan
+        Expand-Archive -Path $zipFile.FullName -DestinationPath $tempExtract -Force
+
+        $manifestFile = Join-Path $tempExtract "manifest.txt"
+        if (-not (Test-Path $manifestFile)) {
+            throw "Manifest file not found inside the ZIP. Cannot verify integrity."
+        }
+
+        $manifestLines = Get-Content $manifestFile | Select-Object -Skip 2
+        $allValid = $true
+
+        Write-Host "`nIntegrity Report:" -ForegroundColor White
+        Write-Host ("-" * 30)
+
+        foreach ($line in $manifestLines) {
+            if ([string]::IsNullOrWhiteSpace($line)) { continue }
+            
+            $parts = $line -split " \| "
+            $hashedPath = $parts[1].Trim()  # Now contains the subfolder path
+            $expectedFullHash = $parts[2].Trim()
+            
+            # CRITICAL FIX: Join with the path including subfolders
+            $filePath = Join-Path $tempExtract $hashedPath
+            
+            if (Test-Path $filePath) {
+                $actualHash = (Get-FileHash -Path $filePath -Algorithm SHA256).Hash
+                
+                if ($actualHash -eq $expectedFullHash) {
+                    Write-Host "[PASS] " -NoNewline -ForegroundColor Green
+                    Write-Host "$hashedPath"
+                } else {
+                    Write-Host "[FAIL] " -NoNewline -ForegroundColor Red
+                    Write-Host "$hashedPath (Hash Mismatch!)"
+                    $allValid = $false
+                }
+            } else {
+                Write-Host "[MISSING] " -NoNewline -ForegroundColor Yellow
+                Write-Host "$hashedPath"
+                $allValid = $false
+            }
+        }
+
+        if ($allValid) {
+
+            	Write-Host "`nAll files verified successfully!" -ForegroundColor Green
+	
+	if($ExpandedPath){
+
+		if ((Test-Path $ExpandedPath) -eq $false) { New-Item -ItemType Directory -Path $ExpandedPath | Out-Null }
+
+            		Copy-Item -Path "$tempExtract\*" -Destination $ExpandedPath -Recurse
+
+		Write-Host "Files moved to: $ExpandedPath"
+
+	}
+
+        } else {
+
+		Write-Warning "`nIntegrity check failed. Files were not moved to destination."
+        }
+    }
+    finally {
+        if (Test-Path $tempExtract) {
+            Remove-Item -Path $tempExtract -Recurse -Force
+        }
+    }
+}
