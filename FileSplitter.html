@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File Splitter & SHA-256 Generator</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            max-width: 700px; 
+            margin: 40px auto; 
+            padding: 20px; 
+            border: 1px solid #ddd; 
+            border-radius: 8px; 
+            background-color: #fdfdfd;
+        }
+        .form-group { 
+            margin-bottom: 15px; 
+        }
+        label { 
+            display: block; 
+            margin-bottom: 5px; 
+            font-weight: bold; 
+        }
+        input[type="file"], input[type="number"] { 
+            width: 100%; 
+            padding: 8px; 
+            box-sizing: border-box; 
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button { 
+            background-color: #007BFF; 
+            color: white; 
+            padding: 10px 15px; 
+            border: none; 
+            border-radius: 4px; 
+            cursor: pointer; 
+            font-size: 16px;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        button:hover { 
+            background-color: #0056b3; 
+        }
+        .secondary-btn {
+            background-color: #6c757d;
+        }
+        .secondary-btn:hover {
+            background-color: #5a6268;
+        }
+        #downloadAllBtn {
+            background-color: #28a745;
+            display: none;
+        }
+        #downloadAllBtn:hover {
+            background-color: #218838;
+        }
+        #status { 
+            margin-top: 15px; 
+            font-weight: bold; 
+            color: #333;
+        }
+        #results-controls {
+            display: none;
+            margin-top: 20px;
+            margin-bottom: 10px;
+        }
+        .chunk-item { 
+            background: #fff; 
+            padding: 12px; 
+            margin-bottom: 10px; 
+            border: 1px solid #e1e1e1; 
+            border-radius: 4px; 
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+        }
+        .chunk-item input[type="checkbox"] {
+            margin-top: 4px;
+            transform: scale(1.2);
+            cursor: pointer;
+        }
+        .chunk-info {
+            flex-grow: 1;
+        }
+        .chunk-item a {
+            display: inline-block;
+            margin-top: 6px;
+            color: #007BFF;
+            text-decoration: none;
+            word-break: break-all;
+        }
+        .chunk-item a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+
+    <h2>Local File Splitter & SHA-256 Hash Generator</h2>
+    
+    <div class="form-group">
+        <label for="fileInput">Select File:</label>
+        <input type="file" id="fileInput">
+    </div>
+
+    <div class="form-group">
+        <label for="chunkSizeInput">Max Chunk Size (MB):</label>
+        <input type="number" id="chunkSizeInput" value="24" min="1">
+    </div>
+
+    <div>
+        <button id="processBtn">Split and Generate Hashes</button>
+        <button id="downloadAllBtn">⬇️ Download Selected Files</button>
+    </div>
+
+    <div id="status"></div>
+
+    <div id="results-controls">
+        <button type="button" id="selectAllBtn" class="secondary-btn">Check All</button>
+        <button type="button" id="clearAllBtn" class="secondary-btn">Clear All</button>
+    </div>
+
+    <div id="results"></div>
+
+    <script>
+        let generatedChunks = [];
+
+        document.getElementById('processBtn').addEventListener('click', async () => {
+            const fileInput = document.getElementById('fileInput');
+            const chunkSizeMB = parseFloat(document.getElementById('chunkSizeInput').value);
+            const statusDiv = document.getElementById('status');
+            const resultsDiv = document.getElementById('results');
+            const downloadAllBtn = document.getElementById('downloadAllBtn');
+            const resultsControls = document.getElementById('results-controls');
+
+            resultsDiv.innerHTML = '';
+            statusDiv.textContent = '';
+            downloadAllBtn.style.display = 'none';
+            resultsControls.style.display = 'none';
+            generatedChunks = [];
+
+            if (fileInput.files.length === 0) {
+                statusDiv.textContent = 'Please select a file first.';
+                return;
+            }
+
+            if (isNaN(chunkSizeMB) || chunkSizeMB <= 0) {
+                statusDiv.textContent = 'Please enter a valid chunk size.';
+                return;
+            }
+
+            const file = fileInput.files[0];
+            const chunkSize = chunkSizeMB * 1024 * 1024; // Convert MB to bytes
+            const totalChunks = Math.ceil(file.size / chunkSize);
+
+            statusDiv.textContent = `Processing file (${(file.size / (1024 * 1024)).toFixed(2)} MB) into ${totalChunks} part(s)...`;
+
+            try {
+                for (let i = 0; i < totalChunks; i++) {
+                    const start = i * chunkSize;
+                    const end = Math.min(start + chunkSize, file.size);
+                    const chunk = file.slice(start, end);
+
+                    statusDiv.textContent = `Processing chunk ${i + 1} of ${totalChunks}...`;
+
+                    // Read chunk as ArrayBuffer to compute crypto hash
+                    const arrayBuffer = await chunk.arrayBuffer();
+                    
+                    // Compute SHA-256 using the native Web Crypto API
+                    const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+                    const hashArray = Array.from(new Uint8Array(hashBuffer));
+                    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+                    // Parse filename and extension
+                    const lastDotIndex = file.name.lastIndexOf('.');
+                    let baseName = file.name;
+                    let extension = '';
+                    if (lastDotIndex !== -1) {
+                        baseName = file.name.substring(0, lastDotIndex);
+                        extension = file.name.substring(lastDotIndex);
+                    }
+
+                    // Format filename: filename_partX_[sha256].ext
+                    const chunkFileName = `${baseName}_part${i + 1}_${hashHex}${extension}`;
+                    const chunkUrl = URL.createObjectURL(chunk);
+
+                    // Store reference object with a unique identifier & default checked = true
+                    generatedChunks.push({
+                        id: i,
+                        blob: chunk,
+                        filename: chunkFileName,
+                        url: chunkUrl
+                    });
+
+                    const itemDiv = document.createElement('div');
+                    itemDiv.className = 'chunk-item';
+                    itemDiv.innerHTML = `
+                        <input type="checkbox" class="chunk-checkbox" data-id="${i}" checked>
+                        <div class="chunk-info">
+                            <strong>Part ${i + 1}</strong> (${(chunk.size / (1024 * 1024)).toFixed(2)} MB)<br>
+                            <small><strong>SHA-256:</strong> ${hashHex}</small><br>
+                            <a href="${chunkUrl}" download="${chunkFileName}">⬇️ Download ${chunkFileName}</a>
+                        </div>
+                    `;
+                    resultsDiv.appendChild(itemDiv);
+                }
+
+                statusDiv.textContent = 'Done! All parts generated successfully.';
+                downloadAllBtn.style.display = 'inline-block';
+                resultsControls.style.display = 'block';
+            } catch (error) {
+                console.error(error);
+                statusDiv.textContent = 'An error occurred while processing the file.';
+            }
+        });
+
+        // Select All handler
+        document.getElementById('selectAllBtn').addEventListener('click', () => {
+            document.querySelectorAll('.chunk-checkbox').forEach(cb => cb.checked = true);
+        });
+
+        // Clear All handler
+        document.getElementById('clearAllBtn').addEventListener('click', () => {
+            document.querySelectorAll('.chunk-checkbox').forEach(cb => cb.checked = false);
+        });
+
+        // Download selected files handler
+        document.getElementById('downloadAllBtn').addEventListener('click', () => {
+            if (generatedChunks.length === 0) return;
+
+            const checkboxes = document.querySelectorAll('.chunk-checkbox');
+            const selectedIndices = Array.from(checkboxes)
+                .filter(cb => cb.checked)
+                .map(cb => parseInt(cb.getAttribute('data-id')));
+
+            if (selectedIndices.length === 0) {
+                alert('Please select at least one file to download.');
+                return;
+            }
+
+            // Trigger staggered downloads for selected files only
+            selectedIndices.forEach((chunkId, index) => {
+                const item = generatedChunks.find(c => c.id === chunkId);
+                if (item) {
+                    setTimeout(() => {
+                        const a = document.createElement('a');
+                        a.href = item.url;
+                        a.download = item.filename;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                    }, index * 400); // 400ms delay between each download trigger
+                }
+            });
+        });
+    </script>
+</body>
+</html>

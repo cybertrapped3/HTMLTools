@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Local Text Editor</title>
+<style>
+  body {
+    font-family: monospace;
+    margin: 20px;
+    background: #f5f5f5;
+  }
+
+  .toolbar {
+    margin-bottom: 10px;
+  }
+
+  button, input {
+    margin-right: 6px;
+    padding: 6px;
+    font-size: 14px;
+  }
+
+  .editor-container {
+    display: flex;
+    border: 1px solid #ccc;
+    background: white;
+    height: 400px;
+    overflow: hidden;
+    resize: vertical; 
+  }
+
+  /* Line numbers with CSS counters */
+  .line-numbers {
+    background: #eee;
+    padding: 10px 5px;
+    text-align: right;
+    user-select: none;
+    overflow: hidden;
+    counter-reset: line;
+    font-family: monospace;
+  }
+
+  .line-numbers span {
+    display: block;
+    counter-increment: line;
+  }
+
+  .line-numbers span::before {
+    content: counter(line);
+    display: inline-block;
+    width: 2em;
+    text-align: right;
+    margin-right: 5px;
+    color: #999;
+  }
+
+  textarea {
+    flex: 1;
+    border: none;
+    outline: none;
+    resize: none;
+    padding: 10px;
+    font-size: 14px;
+    line-height: 1.4;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+
+  .search-bar {
+    margin-top: 10px;
+  }
+
+  #searchNotification {
+    margin-left: 10px;
+    color: red;
+    font-weight: bold;
+  }
+</style>
+</head>
+
+<body>
+<h2>Local Text Editor</h2>
+
+<div class="toolbar">
+  <input type="file" id="fileInput" accept=".txt">
+  <button onclick="downloadFile()">Download</button>
+  <span id="filename">(no file loaded)</span>
+</div>
+
+<div class="editor-container">
+  <pre id="lineNumbers" class="line-numbers"><span></span></pre>
+  <textarea id="editor" spellcheck="true"></textarea>
+</div>
+
+<div class="search-bar">
+  <input type="text" id="searchText" placeholder="Search">
+  <input type="text" id="replaceText" placeholder="Replace">
+  <button onclick="findNext()">Find Next</button>
+  <button onclick="replaceOne()">Replace</button>
+  <button onclick="replaceAll()">Replace All</button>
+  <span id="searchNotification"></span>
+</div>
+
+<div style="margin-top: 10px; font-size: 12px; color: #555;">
+    <strong>File Hash (SHA-256):</strong> <span id="hashDisplay">Not calculated yet</span>
+</div>
+
+<script>
+  const editor = document.getElementById("editor");
+  const lineNumbers = document.getElementById("lineNumbers");
+  const fileInput = document.getElementById("fileInput");
+  const filenameDisplay = document.getElementById("filename");
+  const searchNotification = document.getElementById("searchNotification");
+
+  let currentFileName = "my_text.txt";
+  let lastIndex = 0;
+
+  // Load file
+  fileInput.addEventListener("change", () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+
+    currentFileName = file.name;
+    filenameDisplay.textContent = file.name;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      editor.value = e.target.result;
+      updateLineNumbers();
+      editor.scrollTop = 0;
+      editor.scrollLeft = 0;
+    };
+    reader.readAsText(file);
+  });
+
+  // Download file
+//  function downloadFileOldFunction() {
+  //  const blob = new Blob([editor.value], { type: "text/plain" });
+  //  const a = document.createElement("a");
+  //  a.href = URL.createObjectURL(blob);
+  //  a.download = currentFileName;
+ //   a.click();
+ // }
+
+  // Update line numbers
+  function updateLineNumbers() {
+    const lines = editor.value.split(/\r?\n/);
+    lineNumbers.innerHTML = lines.map(() => '<span></span>').join('');
+  }
+
+  editor.addEventListener("input", updateLineNumbers);
+  editor.addEventListener("scroll", () => {
+    lineNumbers.scrollTop = editor.scrollTop;
+  });
+
+  // Search / Replace
+  function findNext() {
+    const search = document.getElementById("searchText").value.toLowerCase();
+    if (!search) {
+      searchNotification.textContent = "";
+      return;
+    }
+
+    const text = editor.value.toLowerCase();
+    const index = text.indexOf(search, lastIndex);
+
+    if (index !== -1) {
+      editor.focus();
+      editor.setSelectionRange(index, index + search.length);
+
+      // Scroll the selection into view
+      const lineHeight = parseFloat(getComputedStyle(editor).lineHeight);
+      const startLine = editor.value.substr(0, index).split("\n").length - 1;
+      editor.scrollTop = startLine * lineHeight;
+
+      lastIndex = index + search.length;
+      searchNotification.textContent = "";
+    } else {
+      lastIndex = 0;
+      searchNotification.textContent = "No more matches";
+    }
+  }
+
+  function replaceOne() {
+    const search = document.getElementById("searchText").value;
+    const replace = document.getElementById("replaceText").value;
+
+    const start = editor.selectionStart;
+    const end = editor.selectionEnd;
+
+    if (editor.value.substring(start, end) === search) {
+      editor.setRangeText(replace);
+    }
+
+    findNext();
+  }
+
+  function replaceAll() {
+    const search = document.getElementById("searchText").value;
+    const replace = document.getElementById("replaceText").value;
+
+    if (!search) {
+      searchNotification.textContent = "";
+      return;
+    }
+
+    editor.value = editor.value.split(search).join(replace);
+    updateLineNumbers();
+    searchNotification.textContent = `All instances replaced`;
+  }
+
+  // Initialize
+  updateLineNumbers();
+
+// --- DOWNLOAD FILE AND HASHING LOGIC --- //
+async function downloadFile() {
+    const textContent = editor.value;
+    const hashDisplay = document.getElementById("hashDisplay");
+
+    // 1. Calculate the hash before downloading
+    try {
+        const hash = await generateHash(textContent);
+        hashDisplay.textContent = hash;
+        hashDisplay.style.color = "#1b5e20"; // Green to indicate success
+        navigator.clipboard.writeText(hash) 
+    } catch (err) {
+        hashDisplay.textContent = "Error calculating hash.";
+        hashDisplay.style.color = "red";
+    }
+
+    // 2. Proceed with the download
+    const blob = new Blob([textContent], { type: "text/plain" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = currentFileName;
+    a.click();
+    
+    // Clean up memory
+    setTimeout(() => URL.revokeObjectURL(a.href), 100);
+}
+
+// Helper function to calculate SHA-256
+async function generateHash(message) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(message);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    
+    // Convert buffer to hex string
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    return hashHex;
+}
+
+
+</script>
+</body>
+</html>
