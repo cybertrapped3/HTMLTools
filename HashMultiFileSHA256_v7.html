@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MultiFile SHA-256 Hasher</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            line-height: 1.6;
+            max-width: 1050px;
+            margin: 40px auto;
+            padding: 0 20px;
+            background-color: #f4f4f9;
+        }
+        .container {
+            background: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h2 { color: #333; margin-top: 0; }
+
+        /* Custom Notification Area */
+        #notification-bar {
+            height: 50px;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            padding: 0 15px;
+            border-radius: 4px;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+        .info { background: #e3f2fd; color: #0d47a1; border: 1px solid #bbdefb; }
+        .success { background: #e8f5e9; color: #1b5e20; border: 1px solid #c8e6c9; }
+
+        input[type="file"] {
+            margin: 20px 0;
+            display: block;
+        }
+
+        /* The Wrapper: Prevents the table from breaking the page on mobile */
+        .table-container {
+            width: 100%;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            table-layout: fixed; /* CRITICAL: Forces the browser to strictly obey your percentages */
+        }
+
+        /* Setting the Column Widths on the header cells */
+        table th:nth-child(1),
+        table td:nth-child(1) {
+            width: 25%;
+        }
+
+        table th:nth-child(2),
+        table td:nth-child(2) {
+            width: 12%;
+        }
+
+        table th:nth-child(3),
+        table td:nth-child(3) {
+            width: 13%;
+        }
+
+        table th:nth-child(4),
+        table td:nth-child(4) {
+            width: 18%;
+        }
+
+        table th:nth-child(5),
+        table td:nth-child(5) {
+            width: 32%;
+        }
+
+        th, td {
+            text-align: left;
+            padding: 6px 8px;
+            border-bottom: 1px solid #ddd;
+            word-wrap: break-word;
+        }
+        td {
+            font-size: 12px;
+        }
+        th { 
+            background-color: #f8f9fa; 
+            font-weight: bold;
+            cursor: pointer;
+            user-select: none;
+            transition: background-color 0.2s;
+        }
+        th:hover {
+            background-color: #eaecef;
+        }
+        .sort-indicator {
+            float: right;
+            font-size: 10px;
+            color: #666;
+            margin-left: 4px;
+        }
+        .hash-cell { 
+            font-family: monospace; 
+            font-style: italic;
+         }
+        .hash-cell > button {
+            font-size: 10px;
+            background: #e8f5e9;
+            color: #1b5e20;
+            border: 1px solid #c8e6c9;
+            border-radius: 2px;
+            float: right;
+            margin: 5px 0 0 0;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        @media print {
+            .hash-cell > button { display: none; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Local SHA-256 Calculator</h2>
+    <p>Select files to calculate their hashes locally. No data leaves your computer.</p>
+
+    <div id="notification-bar" style="display: none;"></div>
+
+    <input type="file"  tabindex="1" id="file-input" multiple>
+
+    <div class="table-container">
+    <table id="results-table" style="display: none;">
+        <thead>
+            <tr>
+                <th data-column="0" tabindex="2">Filename <span class="sort-indicator"></span></th>
+                <th data-column="1" tabindex="3">Size <span class="sort-indicator"></span></th>
+                <th data-column="2" tabindex="4">Type <span class="sort-indicator"></span></th>
+                <th data-column="3" tabindex="5">Last Modified <span class="sort-indicator"></span></th>
+                <th data-column="4" tabindex="6">SHA-256 Hash <span class="sort-indicator"></span></th>
+            </tr>
+        </thead>
+        <tbody id="results-body"></tbody>
+    </table>
+    </div>
+</div>
+
+<script>
+    const fileInput = document.getElementById('file-input');
+    const resultsTable = document.getElementById('results-table');
+    const resultsBody = document.getElementById('results-body');
+    const notifyBar = document.getElementById('notification-bar');
+
+    // Keep track of loaded file data objects to allow clean sorting
+    let fileRecords = [];
+    let currentSort = { column: null, direction: null }; // direction: 'desc' or 'asc'
+
+    function showNotify(message, type = 'info') {
+        notifyBar.textContent = message;
+        notifyBar.className = type;
+        notifyBar.style.display = 'flex';
+    }
+
+    // Helper function to format bytes into human-readable strings
+    function formatBytes(bytes, decimals = 2) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const dm = decimals < 0 ? 0 : decimals;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+    }
+
+    // Helper function to format the file's lastModified timestamp
+    function formatDate(timestamp) {
+        if (!timestamp) return 'Unknown';
+        const date = new Date(timestamp);
+        return date.toLocaleString();
+    }
+
+    fileInput.addEventListener('change', async (e) => {
+        const files = e.target.files;
+        if (files.length === 0) return;
+
+        // Reset UI and data records
+        resultsBody.innerHTML = '';
+        fileRecords = [];
+        currentSort = { column: null, direction: null };
+        updateSortIndicators();
+        
+        resultsTable.style.display = 'table';
+        showNotify(`Processing ${files.length} file(s)...`, 'info');
+
+        for (const file of files) {
+            const record = {
+                fileRef: file,
+                name: file.name,
+                sizeBytes: file.size,
+                sizeFormatted: formatBytes(file.size),
+                type: file.type || 'Unknown',
+                lastModified: file.lastModified || 0,
+                lastModifiedFormatted: formatDate(file.lastModified),
+                hash: '',
+                status: 'calculating'
+            };
+            fileRecords.push(record);
+            renderTable(); // Render progressively as files are loaded
+
+            try {
+                record.hash = await calculateHash(file);
+            } catch (err) {
+                record.hash = "Error calculating hash";
+            }
+            renderTable();
+        }
+
+        showNotify('Processing complete.', 'success');
+    });
+
+    async function calculateHash(file) {
+        const arrayBuffer = await file.arrayBuffer();
+        const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        return hashHex;
+    }
+
+    // Table Header Click Events for Sorting
+    document.querySelectorAll('#results-table th').forEach(th => {
+        th.addEventListener('click', () => {
+            const colIndex = parseInt(th.getAttribute('data-column'));
+            
+            // Toggle direction: First click -> 'desc', Second click -> 'asc'
+            if (currentSort.column === colIndex) {
+                currentSort.direction = currentSort.direction === 'desc' ? 'asc' : 'desc';
+            } else {
+                currentSort.column = colIndex;
+                currentSort.direction = 'desc';
+            }
+
+            sortRecords();
+            renderTable();
+            updateSortIndicators();
+        });
+
+        th.addEventListener("keydown", (e) => {
+
+            if (e.key === "Enter") {
+                const colIndex = parseInt(th.getAttribute('data-column'));
+            
+                // Toggle direction: First click -> 'desc', Second click -> 'asc'
+                if (currentSort.column === colIndex) {
+                    currentSort.direction = currentSort.direction === 'desc' ? 'asc' : 'desc';
+                } else {
+                    currentSort.column = colIndex;
+                    currentSort.direction = 'desc';
+                }
+
+                sortRecords();
+                renderTable();
+                updateSortIndicators();
+            };
+
+        });
+
+    });
+
+    function sortRecords() {
+        if (currentSort.column === null) return;
+
+        fileRecords.sort((a, b) => {
+            let valA, valB;
+
+            switch (currentSort.column) {
+                case 0: // Filename
+                    valA = a.name; valB = b.name;
+                    break;
+                case 1: // Size (sort numerically by raw bytes)
+                    valA = a.sizeBytes; valB = b.sizeBytes;
+                    break;
+                case 2: // Type
+                    valA = a.type; valB = b.type;
+                    break;
+                case 3: // Last Modified (sort numerically by timestamp)
+                    valA = a.lastModified; valB = b.lastModified;
+                    break;
+                case 4: // Hash
+                    valA = a.hash; valB = b.hash;
+                    break;
+                default:
+                    return 0;
+            }
+
+            let comparison = 0;
+            if (typeof valA === 'number' && typeof valB === 'number') {
+                comparison = valA - valB;
+            } else {
+                comparison = String(valA).localeCompare(String(valB), undefined, { numeric: true, sensitivity: 'base' });
+            }
+
+            return currentSort.direction === 'desc' ? -comparison : comparison;
+        });
+    }
+
+    function updateSortIndicators() {
+        document.querySelectorAll('#results-table th').forEach((th, idx) => {
+            const indicator = th.querySelector('.sort-indicator');
+            if (idx === currentSort.column) {
+                indicator.textContent = currentSort.direction === 'desc' ? ' ▼' : ' ▲';
+            } else {
+                indicator.textContent = '';
+            }
+        });
+    }
+
+    function renderTable() {
+        resultsBody.innerHTML = '';
+        fileRecords.forEach(record => {
+            const row = document.createElement('tr');
+
+            const actionHtml = record.hash.length === 64 
+                ? `<button onclick="navigator.clipboard.writeText('${record.hash}')">Copy</button>` 
+                : '';
+
+            const displayHash = record.hash || 'Calculating...';
+
+            row.innerHTML = `
+                <td>${record.name}</td>
+                <td>${record.sizeFormatted}</td>
+                <td>${record.type}</td>
+                <td>${record.lastModifiedFormatted}</td>
+                <td class="hash-cell">
+                    ${displayHash}
+                    ${actionHtml}
+                </td>
+            `;
+            resultsBody.appendChild(row);
+        });
+    }
+</script>
+
+</body>
+</html>
